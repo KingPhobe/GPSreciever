@@ -1,10 +1,13 @@
 .PHONY: install test demo
 
 install:
-	@echo "No install steps defined."
+	python -m pip install -U pip
+	python -m pip install -e ".[dev]"
 
 test:
-	@echo "No tests defined."
+	python -m pip install -U pip
+	python -m pip install -e ".[dev]"
+	pytest -q
 
 demo:
 	@echo "No demo steps defined."
