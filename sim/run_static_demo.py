@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import matplotlib.pyplot as plt
 
 from gnss_twin.models import (
     DopMetrics,
@@ -14,7 +15,7 @@ from gnss_twin.models import (
     ResidualStats,
     SvState,
 )
-from gnss_twin.meas.pseudorange import SyntheticMeasurementSource
+from gnss_twin.meas.pseudorange import LIGHT_SPEED_MPS, SyntheticMeasurementSource, geometric_range_m
 from gnss_twin.sat.simple_gps import SimpleGpsConfig, SimpleGpsConstellation
 from gnss_twin.sat.visibility import visible_sv_states
 from gnss_twin.utils.angles import elev_az_from_rx_sv
@@ -30,6 +31,7 @@ def main() -> None:
         t=0.0,
         pr_m=2.35e7,
         prr_mps=None,
+        sigma_pr_m=1.0,
         cn0_dbhz=45.0,
         elev_deg=30.0,
         az_deg=120.0,
@@ -75,15 +77,45 @@ def main() -> None:
     print(f"Sample elevation/azimuth (deg): ({elev_deg:.2f}, {az_deg:.2f})")
 
     constellation = SimpleGpsConstellation(SimpleGpsConfig(seed=42))
-    measurement_source = SyntheticMeasurementSource(constellation=constellation, receiver_truth=dummy_truth)
+    measurement_source = SyntheticMeasurementSource(
+        constellation=constellation,
+        receiver_truth=dummy_truth,
+        cn0_zenith_dbhz=47.0,
+    )
     first_epoch_meas = measurement_source.get_measurements(0.0)
     print("First-epoch pseudoranges (m):")
     for meas in first_epoch_meas:
-        print(f"  {meas.sv_id}: {meas.pr_m:.3f} (elev {meas.elev_deg:.2f} deg)")
+        print(
+            f"  {meas.sv_id}: {meas.pr_m:.3f} (elev {meas.elev_deg:.2f} deg, cn0 {meas.cn0_dbhz:.1f})"
+        )
     for t in range(5):
         sv_states = constellation.get_sv_states(float(t))
         visible = visible_sv_states(receiver_truth, sv_states, elevation_mask_deg=10.0)
         print(f"{len(visible)} visible satellites at t={t}s")
+
+    times = np.arange(0.0, 60.0, 1.0)
+    rms_errors: list[float] = []
+    for t in times:
+        sv_states = constellation.get_sv_states(float(t))
+        sv_by_id = {state.sv_id: state for state in sv_states}
+        meas = measurement_source.get_measurements(float(t))
+        errors = []
+        for m in meas:
+            state = sv_by_id[m.sv_id]
+            geometric = geometric_range_m(receiver_truth, state.pos_ecef_m)
+            clock_term = LIGHT_SPEED_MPS * (measurement_source.receiver_clock_bias_s - state.clk_bias_s)
+            errors.append(m.pr_m - geometric - clock_term)
+        rms = float(np.sqrt(np.mean(np.square(errors)))) if errors else 0.0
+        rms_errors.append(rms)
+
+    plt.figure(figsize=(8, 4))
+    plt.plot(times, rms_errors, marker="o", markersize=3)
+    plt.title("Pseudorange Error RMS over 60s")
+    plt.xlabel("Time (s)")
+    plt.ylabel("RMS error (m)")
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()
 
 
 if __name__ == "__main__":

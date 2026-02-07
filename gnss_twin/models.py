@@ -17,6 +17,7 @@ class GnssMeasurement:
     t: float
     pr_m: float
     prr_mps: float | None
+    sigma_pr_m: float
     cn0_dbhz: float
     elev_deg: float
     az_deg: float
