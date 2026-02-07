@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+
 from gnss_twin.models import (
     DopMetrics,
     EpochLog,
@@ -13,6 +14,8 @@ from gnss_twin.models import (
     ResidualStats,
     SvState,
 )
+from gnss_twin.sat.simple_gps import SimpleGpsConstellation, SimpleGpsConfig
+from gnss_twin.sat.visibility import visible_sv_states
 from gnss_twin.utils.angles import elev_az_from_rx_sv
 from gnss_twin.utils.wgs84 import ecef_to_lla, lla_to_ecef
 
@@ -69,6 +72,12 @@ def main() -> None:
     sv_overhead = lla_to_ecef(rx_lat, rx_lon, 20_200_000.0)
     elev_deg, az_deg = elev_az_from_rx_sv(receiver_truth, sv_overhead)
     print(f"Sample elevation/azimuth (deg): ({elev_deg:.2f}, {az_deg:.2f})")
+
+    constellation = SimpleGpsConstellation(SimpleGpsConfig(seed=42))
+    for t in range(5):
+        sv_states = constellation.get_sv_states(float(t))
+        visible = visible_sv_states(receiver_truth, sv_states, elevation_mask_deg=10.0)
+        print(f"{len(visible)} visible satellites at t={t}s")
 
 
 if __name__ == "__main__":
