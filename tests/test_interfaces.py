@@ -27,6 +27,7 @@ def test_dataclass_fields() -> None:
         "cn0_dbhz",
         "elev_deg",
         "az_deg",
+        "pr_model_corr_m",
         "flags",
     ]
     assert [field.name for field in fields(SvState)] == [

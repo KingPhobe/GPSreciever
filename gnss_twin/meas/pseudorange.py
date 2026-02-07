@@ -126,6 +126,7 @@ class SyntheticMeasurementSource(MeasurementSource):
                 temp_k=self.temp_k,
                 rel_humidity=self.rel_humidity,
             )
+            model_corr_m = iono_delay_m + tropo_delay_m
             multipath_m = (
                 multipath_bias_m(
                     elev_deg,
@@ -141,7 +142,7 @@ class SyntheticMeasurementSource(MeasurementSource):
                 self.receiver_clock_bias_s,
                 state.pos_ecef_m,
                 state.clk_bias_s,
-            ) + iono_delay_m + tropo_delay_m + multipath_m + noise_m
+            ) + model_corr_m + multipath_m + noise_m
             los = state.pos_ecef_m - self.receiver_truth.pos_ecef_m
             rho = float(np.linalg.norm(los))
             los_unit = los / rho
@@ -159,6 +160,7 @@ class SyntheticMeasurementSource(MeasurementSource):
                     sv_id=state.sv_id,
                     t=t,
                     pr_m=pr_m,
+                    pr_model_corr_m=model_corr_m,
                     prr_mps=prr_mps,
                     sigma_pr_m=sigma_pr_m,
                     cn0_dbhz=cn0_dbhz,

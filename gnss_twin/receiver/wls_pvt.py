@@ -55,7 +55,8 @@ def _build_matrices(
         if rho <= 0.0:
             continue
         predicted = rho + LIGHT_SPEED_MPS * (clk_bias_s - state.clk_bias_s)
-        residuals.append(meas.pr_m - predicted)
+        pr_corr = meas.pr_m - getattr(meas, "pr_model_corr_m", 0.0)
+        residuals.append(pr_corr - predicted)
         h_rows.append((-(los / rho)).tolist() + [LIGHT_SPEED_MPS])
         sigma = max(float(meas.sigma_pr_m), 1e-3)
         weights.append(1.0 / (sigma * sigma))
