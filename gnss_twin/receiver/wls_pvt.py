@@ -15,7 +15,9 @@ class WlsPvtResult:
     """Weighted least squares position/clock bias estimate."""
 
     pos_ecef_m: np.ndarray
+    vel_ecef_mps: np.ndarray | None
     clk_bias_s: float
+    clk_drift_sps: float | None
     residuals_m: dict[str, float]
     covariance: np.ndarray
     dop: DopMetrics
@@ -57,6 +59,34 @@ def _build_matrices(
         h_rows.append((-(los / rho)).tolist() + [LIGHT_SPEED_MPS])
         sigma = max(float(meas.sigma_pr_m), 1e-3)
         weights.append(1.0 / (sigma * sigma))
+        sv_ids.append(meas.sv_id)
+    return np.array(h_rows, dtype=float), np.array(residuals, dtype=float), np.diag(weights), sv_ids
+
+
+def _build_velocity_matrices(
+    pos_ecef_m: np.ndarray,
+    measurements: list[GnssMeasurement],
+    sv_by_id: dict[str, SvState],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str]]:
+    h_rows: list[list[float]] = []
+    residuals: list[float] = []
+    weights: list[float] = []
+    sv_ids: list[str] = []
+    for meas in measurements:
+        if meas.prr_mps is None:
+            continue
+        state = sv_by_id.get(meas.sv_id)
+        if state is None:
+            continue
+        los = state.pos_ecef_m - pos_ecef_m
+        rho = float(np.linalg.norm(los))
+        if rho <= 0.0:
+            continue
+        los_unit = los / rho
+        predicted_sv_term = float(np.dot(state.vel_ecef_mps, los_unit)) - LIGHT_SPEED_MPS * state.clk_drift_sps
+        residuals.append(meas.prr_mps - predicted_sv_term)
+        h_rows.append((-(los_unit)).tolist() + [LIGHT_SPEED_MPS])
+        weights.append(1.0)
         sv_ids.append(meas.sv_id)
     return np.array(h_rows, dtype=float), np.array(residuals, dtype=float), np.diag(weights), sv_ids
 
@@ -105,9 +135,23 @@ def wls_pvt(
 
     h_matrix, residuals, weights, sv_ids = _build_matrices(pos, clk_bias, measurements, sv_by_id)
     residuals_by_sv = {sv_id: float(resid) for sv_id, resid in zip(sv_ids, residuals)}
+    vel_ecef_mps: np.ndarray | None = None
+    clk_drift_sps: float | None = None
+    vel_h_matrix, vel_residuals, vel_weights, _ = _build_velocity_matrices(pos, measurements, sv_by_id)
+    if vel_h_matrix.shape[0] >= 4:
+        vel_normal = vel_h_matrix.T @ vel_weights @ vel_h_matrix
+        try:
+            vel_solution = np.linalg.solve(vel_normal, vel_h_matrix.T @ vel_weights @ vel_residuals)
+            vel_ecef_mps = vel_solution[:3]
+            clk_drift_sps = float(vel_solution[3])
+        except np.linalg.LinAlgError:
+            vel_ecef_mps = None
+            clk_drift_sps = None
     return WlsPvtResult(
         pos_ecef_m=pos,
+        vel_ecef_mps=vel_ecef_mps,
         clk_bias_s=clk_bias,
+        clk_drift_sps=clk_drift_sps,
         residuals_m=residuals_by_sv,
         covariance=covariance,
         dop=dop,
