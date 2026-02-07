@@ -49,6 +49,7 @@ class SyntheticMeasurementSource(MeasurementSource):
     healthy_cn0_dbhz: float = 28.0
     pr_sigma_base_m: float = 0.6
     pr_elev_weight: float = 1.0
+    prr_sigma_mps: float = 0.2
     iono_alpha: tuple[float, float, float, float] | None = None
     iono_beta: tuple[float, float, float, float] | None = None
     pressure_hpa: float = 1013.25
@@ -141,12 +142,24 @@ class SyntheticMeasurementSource(MeasurementSource):
                 state.pos_ecef_m,
                 state.clk_bias_s,
             ) + iono_delay_m + tropo_delay_m + multipath_m + noise_m
+            los = state.pos_ecef_m - self.receiver_truth.pos_ecef_m
+            rho = float(np.linalg.norm(los))
+            los_unit = los / rho
+            range_rate_mps = float(
+                np.dot(state.vel_ecef_mps - self.receiver_truth.vel_ecef_mps, los_unit)
+            )
+            prr_noise_mps = float(self.rng.normal(0.0, self.prr_sigma_mps))
+            prr_mps = (
+                range_rate_mps
+                + LIGHT_SPEED_MPS * (self.receiver_clock_drift_sps - state.clk_drift_sps)
+                + prr_noise_mps
+            )
             measurements.append(
                 GnssMeasurement(
                     sv_id=state.sv_id,
                     t=t,
                     pr_m=pr_m,
-                    prr_mps=None,
+                    prr_mps=prr_mps,
                     sigma_pr_m=sigma_pr_m,
                     cn0_dbhz=cn0_dbhz,
                     elev_deg=elev_deg,

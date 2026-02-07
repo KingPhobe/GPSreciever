@@ -98,6 +98,8 @@ def main() -> None:
     rms_errors: list[float] = []
     pos_errors: list[float] = []
     pdop_series: list[float] = []
+    speed_series: list[float] = []
+    drift_series: list[float] = []
     last_pos = receiver_truth + 100.0
     last_clk = receiver_clock
     for t in times:
@@ -117,13 +119,21 @@ def main() -> None:
         if solution is None:
             pos_errors.append(float("nan"))
             pdop_series.append(float("nan"))
+            speed_series.append(float("nan"))
+            drift_series.append(float("nan"))
         else:
             pos_errors.append(float(np.linalg.norm(solution.pos_ecef_m - receiver_truth)))
             pdop_series.append(solution.dop.pdop)
             last_pos = solution.pos_ecef_m
             last_clk = solution.clk_bias_s
+            if solution.vel_ecef_mps is None or solution.clk_drift_sps is None:
+                speed_series.append(float("nan"))
+                drift_series.append(float("nan"))
+            else:
+                speed_series.append(float(np.linalg.norm(solution.vel_ecef_mps)))
+                drift_series.append(solution.clk_drift_sps)
 
-    fig, axes = plt.subplots(2, 1, figsize=(9, 6), sharex=True)
+    fig, axes = plt.subplots(3, 1, figsize=(9, 8), sharex=True)
     axes[0].plot(times, pos_errors, marker="o", markersize=3)
     axes[0].set_title("WLS Position Error over 60s")
     axes[0].set_ylabel("Position error (m)")
@@ -131,9 +141,16 @@ def main() -> None:
 
     axes[1].plot(times, pdop_series, marker="o", markersize=3, color="tab:orange")
     axes[1].set_title("WLS PDOP over 60s")
-    axes[1].set_xlabel("Time (s)")
     axes[1].set_ylabel("PDOP")
     axes[1].grid(True, alpha=0.3)
+
+    axes[2].plot(times, speed_series, marker="o", markersize=3, color="tab:green", label="Speed (m/s)")
+    axes[2].plot(times, drift_series, marker="x", markersize=3, color="tab:red", label="Clock drift (s/s)")
+    axes[2].set_title("Estimated Speed and Clock Drift")
+    axes[2].set_xlabel("Time (s)")
+    axes[2].set_ylabel("Speed / Drift")
+    axes[2].grid(True, alpha=0.3)
+    axes[2].legend(loc="best")
 
     fig.tight_layout()
     plt.show()
