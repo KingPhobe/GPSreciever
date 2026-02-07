@@ -14,7 +14,8 @@ from gnss_twin.models import (
     ResidualStats,
     SvState,
 )
-from gnss_twin.sat.simple_gps import SimpleGpsConstellation, SimpleGpsConfig
+from gnss_twin.meas.pseudorange import SyntheticMeasurementSource
+from gnss_twin.sat.simple_gps import SimpleGpsConfig, SimpleGpsConstellation
 from gnss_twin.sat.visibility import visible_sv_states
 from gnss_twin.utils.angles import elev_az_from_rx_sv
 from gnss_twin.utils.wgs84 import ecef_to_lla, lla_to_ecef
@@ -74,6 +75,11 @@ def main() -> None:
     print(f"Sample elevation/azimuth (deg): ({elev_deg:.2f}, {az_deg:.2f})")
 
     constellation = SimpleGpsConstellation(SimpleGpsConfig(seed=42))
+    measurement_source = SyntheticMeasurementSource(constellation=constellation, receiver_truth=dummy_truth)
+    first_epoch_meas = measurement_source.get_measurements(0.0)
+    print("First-epoch pseudoranges (m):")
+    for meas in first_epoch_meas:
+        print(f"  {meas.sv_id}: {meas.pr_m:.3f} (elev {meas.elev_deg:.2f} deg)")
     for t in range(5):
         sv_states = constellation.get_sv_states(float(t))
         visible = visible_sv_states(receiver_truth, sv_states, elevation_mask_deg=10.0)
