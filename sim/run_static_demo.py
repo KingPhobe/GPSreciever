@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import numpy as np
-
-from gnss_twin.integrity import raim_fde
-from gnss_twin.meas import NoiseModel, compute_measurements
 from gnss_twin.models import (
     DopMetrics,
     EpochLog,
@@ -16,15 +13,11 @@ from gnss_twin.models import (
     ResidualStats,
     SvState,
 )
-from gnss_twin.sat import SyntheticOrbitModel
-from gnss_twin.utils import get_logger, plot_residuals, plot_solution_errors
 
 
 def main() -> None:
-    config = SimConfig()
-    print("Static demo configuration:")
-    print(config)
-
+    receiver_truth = np.array([1_000_000.0, -4_900_000.0, 3_900_000.0])
+    receiver_clock = 4.2e-6
     dummy_meas = GnssMeasurement(
         sv_id="G01",
         t=0.0,
