@@ -13,10 +13,13 @@ from gnss_twin.models import (
     ResidualStats,
     SvState,
 )
+from gnss_twin.utils.angles import elev_az_from_rx_sv
+from gnss_twin.utils.wgs84 import ecef_to_lla, lla_to_ecef
 
 
 def main() -> None:
-    receiver_truth = np.array([1_000_000.0, -4_900_000.0, 3_900_000.0])
+    receiver_lla = (37.4275, -122.1697, 30.0)
+    receiver_truth = lla_to_ecef(*receiver_lla)
     receiver_clock = 4.2e-6
     dummy_meas = GnssMeasurement(
         sv_id="G01",
@@ -59,6 +62,13 @@ def main() -> None:
         per_sv_stats={dummy_sv.sv_id: {"residual_m": 1.0, "used": 1.0}},
     )
     print(epoch_log)
+    rx_lat, rx_lon, rx_alt = ecef_to_lla(*receiver_truth)
+    print(f"Receiver LLA (deg, deg, m): ({rx_lat:.6f}, {rx_lon:.6f}, {rx_alt:.2f})")
+    print(f"Receiver ECEF (m): {receiver_truth}")
+
+    sv_overhead = lla_to_ecef(rx_lat, rx_lon, 20_200_000.0)
+    elev_deg, az_deg = elev_az_from_rx_sv(receiver_truth, sv_overhead)
+    print(f"Sample elevation/azimuth (deg): ({elev_deg:.2f}, {az_deg:.2f})")
 
 
 if __name__ == "__main__":
