@@ -16,6 +16,7 @@ from gnss_twin.models import (
     SvState,
 )
 from gnss_twin.meas.pseudorange import LIGHT_SPEED_MPS, SyntheticMeasurementSource, geometric_range_m
+from gnss_twin.receiver.wls_pvt import wls_pvt
 from gnss_twin.sat.simple_gps import SimpleGpsConfig, SimpleGpsConstellation
 from gnss_twin.sat.visibility import visible_sv_states
 from gnss_twin.utils.angles import elev_az_from_rx_sv
@@ -95,6 +96,10 @@ def main() -> None:
 
     times = np.arange(0.0, 60.0, 1.0)
     rms_errors: list[float] = []
+    pos_errors: list[float] = []
+    pdop_series: list[float] = []
+    last_pos = receiver_truth + 100.0
+    last_clk = receiver_clock
     for t in times:
         sv_states = constellation.get_sv_states(float(t))
         sv_by_id = {state.sv_id: state for state in sv_states}
@@ -108,13 +113,29 @@ def main() -> None:
         rms = float(np.sqrt(np.mean(np.square(errors)))) if errors else 0.0
         rms_errors.append(rms)
 
-    plt.figure(figsize=(8, 4))
-    plt.plot(times, rms_errors, marker="o", markersize=3)
-    plt.title("Pseudorange Error RMS over 60s")
-    plt.xlabel("Time (s)")
-    plt.ylabel("RMS error (m)")
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
+        solution = wls_pvt(meas, sv_states, initial_pos_ecef_m=last_pos, initial_clk_bias_s=last_clk)
+        if solution is None:
+            pos_errors.append(float("nan"))
+            pdop_series.append(float("nan"))
+        else:
+            pos_errors.append(float(np.linalg.norm(solution.pos_ecef_m - receiver_truth)))
+            pdop_series.append(solution.dop.pdop)
+            last_pos = solution.pos_ecef_m
+            last_clk = solution.clk_bias_s
+
+    fig, axes = plt.subplots(2, 1, figsize=(9, 6), sharex=True)
+    axes[0].plot(times, pos_errors, marker="o", markersize=3)
+    axes[0].set_title("WLS Position Error over 60s")
+    axes[0].set_ylabel("Position error (m)")
+    axes[0].grid(True, alpha=0.3)
+
+    axes[1].plot(times, pdop_series, marker="o", markersize=3, color="tab:orange")
+    axes[1].set_title("WLS PDOP over 60s")
+    axes[1].set_xlabel("Time (s)")
+    axes[1].set_ylabel("PDOP")
+    axes[1].grid(True, alpha=0.3)
+
+    fig.tight_layout()
     plt.show()
 
 
