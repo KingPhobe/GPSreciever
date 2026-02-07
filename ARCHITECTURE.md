@@ -113,7 +113,7 @@ class NavSolution:
     chi_square: float
 
     # Flags / metadata
-    fix_type: str  # "NO_FIX", "2D", "3D"
+    fix_type: str  # "NO FIX", "2D", "3D"
     valid: bool
     sv_used: list[str]
     sv_rejected: list[str]
