@@ -52,16 +52,34 @@ def wls_solve(
             los = sat_pos - position
             rho = float(np.linalg.norm(los))
             preds.append(rho + LIGHT_SPEED * (clock_bias - meas.sat_clock_bias_s))
-            h_rows.append(-(los / rho).tolist() + [LIGHT_SPEED])
-        residuals = np.array([m.pseudorange_m for m in measurements]) - np.array(preds)
+            h_rows.append((-(los / rho)).tolist() + [LIGHT_SPEED])
+        observed = np.array(
+            [
+                m.pseudorange_m - m.iono_delay_m - m.tropo_delay_m - m.noise_m
+                for m in measurements
+            ]
+        )
+        residuals = observed - np.array(preds)
         h_matrix = np.array(h_rows, dtype=float)
         normal = h_matrix.T @ weights @ h_matrix
         delta = np.linalg.solve(normal, h_matrix.T @ weights @ residuals)
         position += delta[:3]
-        clock_bias += delta[3] / LIGHT_SPEED
+        clock_bias += delta[3]
         if np.linalg.norm(delta[:3]) < 1e-4:
             break
     covariance = np.linalg.inv(normal)
     dop = _compute_dop(covariance)
-    residuals = np.array([m.pseudorange_m for m in measurements]) - np.array(preds)
+    final_preds = []
+    for meas in measurements:
+        sat_pos = meas.sat_position_ecef_m
+        los = sat_pos - position
+        rho = float(np.linalg.norm(los))
+        final_preds.append(rho + LIGHT_SPEED * (clock_bias - meas.sat_clock_bias_s))
+    observed = np.array(
+        [
+            m.pseudorange_m - m.iono_delay_m - m.tropo_delay_m - m.noise_m
+            for m in measurements
+        ]
+    )
+    residuals = observed - np.array(final_preds)
     return Solution(position_ecef_m=position, clock_bias_s=clock_bias, residuals_m=residuals, covariance=covariance, dop=dop)
