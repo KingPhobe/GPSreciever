@@ -74,6 +74,13 @@ class FixFlags:
     valid: bool
     sv_used: list[str]
     sv_rejected: list[str]
+    sv_count: int
+    sv_in_view: int
+    mask_ok: bool
+    pdop: float
+    gdop: float
+    chi_square: float
+    chi_square_threshold: float
 
 
 @dataclass(frozen=True)

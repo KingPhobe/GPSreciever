@@ -16,7 +16,7 @@ from gnss_twin.models import (
     SvState,
 )
 from gnss_twin.meas.pseudorange import LIGHT_SPEED_MPS, SyntheticMeasurementSource, geometric_range_m
-from gnss_twin.receiver.wls_pvt import wls_pvt
+from gnss_twin.integrity.flags import IntegrityConfig, SvTracker, integrity_pvt
 from gnss_twin.sat.simple_gps import SimpleGpsConfig, SimpleGpsConstellation
 from gnss_twin.sat.visibility import visible_sv_states
 from gnss_twin.utils.angles import elev_az_from_rx_sv
@@ -53,7 +53,19 @@ def main() -> None:
         clk_drift_sps=0.0,
         dop=DopMetrics(gdop=2.0, pdop=1.5, hdop=1.0, vdop=1.2),
         residuals=ResidualStats(rms_m=1.0, mean_m=0.1, max_m=2.5, chi_square=0.8),
-        fix_flags=FixFlags(fix_type="3D", valid=True, sv_used=[dummy_sv.sv_id], sv_rejected=[]),
+        fix_flags=FixFlags(
+            fix_type="3D",
+            valid=True,
+            sv_used=[dummy_sv.sv_id],
+            sv_rejected=[],
+            sv_count=1,
+            sv_in_view=1,
+            mask_ok=True,
+            pdop=1.5,
+            gdop=2.0,
+            chi_square=0.8,
+            chi_square_threshold=3.8,
+        ),
     )
     dummy_truth = ReceiverTruth(
         pos_ecef_m=receiver_truth,
@@ -100,8 +112,12 @@ def main() -> None:
     pdop_series: list[float] = []
     speed_series: list[float] = []
     drift_series: list[float] = []
+    fix_valid_series: list[float] = []
+    fix_type_series: list[float] = []
     last_pos = receiver_truth + 100.0
     last_clk = receiver_clock
+    integrity_cfg = IntegrityConfig()
+    tracker = SvTracker(integrity_cfg)
     for t in times:
         sv_states = constellation.get_sv_states(float(t))
         sv_by_id = {state.sv_id: state for state in sv_states}
@@ -115,25 +131,35 @@ def main() -> None:
         rms = float(np.sqrt(np.mean(np.square(errors)))) if errors else 0.0
         rms_errors.append(rms)
 
-        solution = wls_pvt(meas, sv_states, initial_pos_ecef_m=last_pos, initial_clk_bias_s=last_clk)
-        if solution is None:
+        solution, _ = integrity_pvt(
+            meas,
+            sv_states,
+            initial_pos_ecef_m=last_pos,
+            initial_clk_bias_s=last_clk,
+            config=integrity_cfg,
+            tracker=tracker,
+        )
+        fix_type = solution.fix_flags.fix_type
+        fix_valid_series.append(1.0 if solution.fix_flags.valid else 0.0)
+        fix_type_series.append({"NO FIX": 0.0, "2D": 1.0, "3D": 2.0}.get(fix_type, 0.0))
+        if fix_type == "NO FIX" or not np.isfinite(solution.pos_ecef).all():
             pos_errors.append(float("nan"))
             pdop_series.append(float("nan"))
             speed_series.append(float("nan"))
             drift_series.append(float("nan"))
         else:
-            pos_errors.append(float(np.linalg.norm(solution.pos_ecef_m - receiver_truth)))
+            pos_errors.append(float(np.linalg.norm(solution.pos_ecef - receiver_truth)))
             pdop_series.append(solution.dop.pdop)
-            last_pos = solution.pos_ecef_m
+            last_pos = solution.pos_ecef
             last_clk = solution.clk_bias_s
-            if solution.vel_ecef_mps is None or solution.clk_drift_sps is None:
+            if solution.vel_ecef is None:
                 speed_series.append(float("nan"))
                 drift_series.append(float("nan"))
             else:
-                speed_series.append(float(np.linalg.norm(solution.vel_ecef_mps)))
+                speed_series.append(float(np.linalg.norm(solution.vel_ecef)))
                 drift_series.append(solution.clk_drift_sps)
 
-    fig, axes = plt.subplots(3, 1, figsize=(9, 8), sharex=True)
+    fig, axes = plt.subplots(4, 1, figsize=(9, 10), sharex=True)
     axes[0].plot(times, pos_errors, marker="o", markersize=3)
     axes[0].set_title("WLS Position Error over 60s")
     axes[0].set_ylabel("Position error (m)")
@@ -147,10 +173,19 @@ def main() -> None:
     axes[2].plot(times, speed_series, marker="o", markersize=3, color="tab:green", label="Speed (m/s)")
     axes[2].plot(times, drift_series, marker="x", markersize=3, color="tab:red", label="Clock drift (s/s)")
     axes[2].set_title("Estimated Speed and Clock Drift")
-    axes[2].set_xlabel("Time (s)")
     axes[2].set_ylabel("Speed / Drift")
     axes[2].grid(True, alpha=0.3)
     axes[2].legend(loc="best")
+
+    axes[3].step(times, fix_type_series, where="post", color="tab:purple", label="Fix type (0/1/2)")
+    axes[3].plot(times, fix_valid_series, marker="o", markersize=2, color="tab:gray", label="Valid")
+    axes[3].set_title("Fix Timeline")
+    axes[3].set_xlabel("Time (s)")
+    axes[3].set_ylabel("Fix type / Valid")
+    axes[3].set_yticks([0.0, 1.0, 2.0])
+    axes[3].set_yticklabels(["NO FIX", "2D", "3D"])
+    axes[3].grid(True, alpha=0.3)
+    axes[3].legend(loc="best")
 
     fig.tight_layout()
     plt.show()

@@ -59,6 +59,19 @@ def test_dataclass_fields() -> None:
         "truth",
         "per_sv_stats",
     ]
+    assert [field.name for field in fields(FixFlags)] == [
+        "fix_type",
+        "valid",
+        "sv_used",
+        "sv_rejected",
+        "sv_count",
+        "sv_in_view",
+        "mask_ok",
+        "pdop",
+        "gdop",
+        "chi_square",
+        "chi_square_threshold",
+    ]
 
 
 class DummyMeasurementSource(MeasurementSource):
@@ -101,7 +114,19 @@ class DummySolver(NavSolver):
             clk_drift_sps=0.0,
             dop=DopMetrics(gdop=1.0, pdop=1.0, hdop=1.0, vdop=1.0),
             residuals=ResidualStats(rms_m=0.0, mean_m=0.0, max_m=0.0, chi_square=0.0),
-            fix_flags=FixFlags(fix_type="NO_FIX", valid=False, sv_used=[], sv_rejected=[]),
+            fix_flags=FixFlags(
+                fix_type="NO FIX",
+                valid=False,
+                sv_used=[],
+                sv_rejected=[],
+                sv_count=0,
+                sv_in_view=0,
+                mask_ok=False,
+                pdop=float("inf"),
+                gdop=float("inf"),
+                chi_square=float("nan"),
+                chi_square_threshold=float("inf"),
+            ),
         )
 
 
