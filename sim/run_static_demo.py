@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-import numpy as np
-import matplotlib.pyplot as plt
+import argparse
+from pathlib import Path
 
+import numpy as np
+
+from gnss_twin.logger import save_epochs_csv, save_epochs_npz
 from gnss_twin.models import (
     DopMetrics,
     EpochLog,
@@ -17,13 +20,14 @@ from gnss_twin.models import (
 )
 from gnss_twin.meas.pseudorange import LIGHT_SPEED_MPS, SyntheticMeasurementSource, geometric_range_m
 from gnss_twin.integrity.flags import IntegrityConfig, SvTracker, integrity_pvt
+from gnss_twin.plots import save_run_plots
 from gnss_twin.sat.simple_gps import SimpleGpsConfig, SimpleGpsConstellation
 from gnss_twin.sat.visibility import visible_sv_states
 from gnss_twin.utils.angles import elev_az_from_rx_sv
 from gnss_twin.utils.wgs84 import ecef_to_lla, lla_to_ecef
 
 
-def main() -> None:
+def run_demo(*, duration_s: float, out_dir: str | Path, run_name: str | None = None) -> Path:
     receiver_lla = (37.4275, -122.1697, 30.0)
     receiver_truth = lla_to_ecef(*receiver_lla)
     receiver_clock = 4.2e-6
@@ -106,7 +110,7 @@ def main() -> None:
         visible = visible_sv_states(receiver_truth, sv_states, elevation_mask_deg=10.0)
         print(f"{len(visible)} visible satellites at t={t}s")
 
-    times = np.arange(0.0, 60.0, 1.0)
+    times = np.arange(0.0, duration_s, 1.0)
     rms_errors: list[float] = []
     pos_errors: list[float] = []
     pdop_series: list[float] = []
@@ -118,6 +122,7 @@ def main() -> None:
     last_clk = receiver_clock
     integrity_cfg = IntegrityConfig()
     tracker = SvTracker(integrity_cfg)
+    epochs: list[EpochLog] = []
     for t in times:
         sv_states = constellation.get_sv_states(float(t))
         sv_by_id = {state.sv_id: state for state in sv_states}
@@ -131,7 +136,7 @@ def main() -> None:
         rms = float(np.sqrt(np.mean(np.square(errors)))) if errors else 0.0
         rms_errors.append(rms)
 
-        solution, _ = integrity_pvt(
+        solution, per_sv_stats = integrity_pvt(
             meas,
             sv_states,
             initial_pos_ecef_m=last_pos,
@@ -159,36 +164,30 @@ def main() -> None:
                 speed_series.append(float(np.linalg.norm(solution.vel_ecef)))
                 drift_series.append(solution.clk_drift_sps)
 
-    fig, axes = plt.subplots(4, 1, figsize=(9, 10), sharex=True)
-    axes[0].plot(times, pos_errors, marker="o", markersize=3)
-    axes[0].set_title("WLS Position Error over 60s")
-    axes[0].set_ylabel("Position error (m)")
-    axes[0].grid(True, alpha=0.3)
+        epochs.append(
+            EpochLog(
+                t=float(t),
+                meas=meas,
+                solution=solution,
+                truth=dummy_truth,
+                per_sv_stats=per_sv_stats,
+            )
+        )
 
-    axes[1].plot(times, pdop_series, marker="o", markersize=3, color="tab:orange")
-    axes[1].set_title("WLS PDOP over 60s")
-    axes[1].set_ylabel("PDOP")
-    axes[1].grid(True, alpha=0.3)
+    output_dir = save_run_plots(epochs, out_dir=out_dir, run_name=run_name)
+    save_epochs_npz(output_dir / "epoch_logs.npz", epochs)
+    save_epochs_csv(output_dir / "epoch_logs.csv", epochs)
+    return output_dir
 
-    axes[2].plot(times, speed_series, marker="o", markersize=3, color="tab:green", label="Speed (m/s)")
-    axes[2].plot(times, drift_series, marker="x", markersize=3, color="tab:red", label="Clock drift (s/s)")
-    axes[2].set_title("Estimated Speed and Clock Drift")
-    axes[2].set_ylabel("Speed / Drift")
-    axes[2].grid(True, alpha=0.3)
-    axes[2].legend(loc="best")
 
-    axes[3].step(times, fix_type_series, where="post", color="tab:purple", label="Fix type (0/1/2)")
-    axes[3].plot(times, fix_valid_series, marker="o", markersize=2, color="tab:gray", label="Valid")
-    axes[3].set_title("Fix Timeline")
-    axes[3].set_xlabel("Time (s)")
-    axes[3].set_ylabel("Fix type / Valid")
-    axes[3].set_yticks([0.0, 1.0, 2.0])
-    axes[3].set_yticklabels(["NO FIX", "2D", "3D"])
-    axes[3].grid(True, alpha=0.3)
-    axes[3].legend(loc="best")
-
-    fig.tight_layout()
-    plt.show()
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Run the static GNSS twin demo.")
+    parser.add_argument("--duration-s", type=float, default=60.0, help="Duration in seconds.")
+    parser.add_argument("--out-dir", type=str, default="out", help="Output directory root.")
+    parser.add_argument("--run-name", type=str, default=None, help="Run name for outputs.")
+    args = parser.parse_args()
+    output_dir = run_demo(duration_s=args.duration_s, out_dir=args.out_dir, run_name=args.run_name)
+    print(f"Saved outputs to {output_dir}")
 
 
 if __name__ == "__main__":

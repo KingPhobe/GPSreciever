@@ -9,21 +9,32 @@ import numpy as np
 
 from gnss_twin.models import EpochLog
 
+_CSV_HEADER = (
+    "t,pos_x,pos_y,pos_z,vel_x,vel_y,vel_z,clk_bias_s,clk_drift_sps,"
+    "gdop,pdop,hdop,vdop,residual_rms_m,residual_mean_m,residual_max_m,chi_square,"
+    "fix_type,valid\n"
+)
+
 
 def append_epoch_csv(path: str | Path, epoch: EpochLog) -> None:
     """Append a single epoch summary to a CSV file."""
 
     target = Path(path)
-    header = (
-        "t,pos_x,pos_y,pos_z,vel_x,vel_y,vel_z,clk_bias_s,clk_drift_sps,"
-        "gdop,pdop,hdop,vdop,residual_rms_m,residual_mean_m,residual_max_m,chi_square,"
-        "fix_type,valid\n"
-    )
     line = _epoch_to_csv_line(epoch)
     if not target.exists():
-        target.write_text(header)
+        target.write_text(_CSV_HEADER)
     with target.open("a", encoding="utf-8") as handle:
         handle.write(line)
+
+
+def save_epochs_csv(path: str | Path, epochs: list[EpochLog]) -> None:
+    """Save all epoch summaries to a CSV file."""
+
+    target = Path(path)
+    target.write_text(_CSV_HEADER)
+    with target.open("a", encoding="utf-8") as handle:
+        for epoch in epochs:
+            handle.write(_epoch_to_csv_line(epoch))
 
 
 def save_epochs_npz(path: str | Path, epochs: list[EpochLog]) -> None:
@@ -31,6 +42,14 @@ def save_epochs_npz(path: str | Path, epochs: list[EpochLog]) -> None:
 
     payload = [asdict(epoch) for epoch in epochs]
     np.savez_compressed(path, epochs=np.array(payload, dtype=object))
+
+
+def load_epochs_npz(path: str | Path) -> list[dict]:
+    """Load epoch logs from a compressed NPZ file."""
+
+    data = np.load(path, allow_pickle=True)
+    epochs = data["epochs"].tolist()
+    return list(epochs)
 
 
 def _epoch_to_csv_line(epoch: EpochLog) -> str:
