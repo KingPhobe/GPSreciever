@@ -21,6 +21,7 @@ class GnssMeasurement:
     cn0_dbhz: float
     elev_deg: float
     az_deg: float
+    pr_model_corr_m: float = 0.0  # Model correction to subtract in solver (e.g., iono+tropo).
     flags: Mapping[str, bool] = field(default_factory=dict)
 
 
