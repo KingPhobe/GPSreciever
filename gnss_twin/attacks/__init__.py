@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from gnss_twin.attacks.base import AttackModel
+from gnss_twin.attacks.jamming import JamCn0DropAttack
 from gnss_twin.attacks.spoofing import SpoofClockRampAttack, SpoofPrRampAttack
 
 if TYPE_CHECKING:
@@ -49,12 +50,20 @@ def create_attack(name: str, params: dict) -> AttackModel:
             ramp_rate_mps=float(params.get("ramp_rate_mps", 1.0)),
             target_sv=target_sv,
         )
+    if lowered == "jam_cn0_drop":
+        return JamCn0DropAttack(
+            start_t=float(params.get("start_t", 20.0)),
+            cn0_drop_db=float(params.get("cn0_drop_db", 15.0)),
+            sigma_pr_scale=float(params.get("sigma_pr_scale", 5.0)),
+            sigma_prr_scale=float(params.get("sigma_prr_scale", 5.0)),
+        )
     raise ValueError(f"Unknown attack model: {name}")
 
 
 __all__ = [
     "AttackModel",
     "NoOpAttack",
+    "JamCn0DropAttack",
     "SpoofClockRampAttack",
     "SpoofPrRampAttack",
     "create_attack",
