@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -22,3 +22,5 @@ class SimConfig:
     sigma_pr_max_m: float = 20.0
     postfit_gate_sigma: float = 4.0
     use_ekf: bool = False
+    attack_name: str | None = None
+    attack_params: dict[str, float] = field(default_factory=dict)
