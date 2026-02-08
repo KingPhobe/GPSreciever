@@ -71,7 +71,7 @@ def test_integrity_rejects_outlier() -> None:
         pr_m=measurements[target_idx].pr_m + 80.0,
     )
 
-    baseline_cfg = IntegrityConfig(max_fde_iterations=0, max_residual_m=5.0, elevation_mask_deg=0.0)
+    baseline_cfg = IntegrityConfig(max_fde_iterations=0, elevation_mask_deg=0.0)
     baseline_solution, _ = integrity_pvt(
         measurements,
         sv_states,
@@ -79,7 +79,7 @@ def test_integrity_rejects_outlier() -> None:
         config=baseline_cfg,
     )
 
-    fde_cfg = IntegrityConfig(max_fde_iterations=1, max_residual_m=5.0, elevation_mask_deg=0.0)
+    fde_cfg = IntegrityConfig(max_fde_iterations=1, elevation_mask_deg=0.0)
     fde_solution, _ = integrity_pvt(
         measurements,
         sv_states,
@@ -89,6 +89,8 @@ def test_integrity_rejects_outlier() -> None:
 
     assert measurements[target_idx].sv_id in fde_solution.fix_flags.sv_rejected
     assert fde_solution.residuals.max_m < baseline_solution.residuals.max_m
+    assert fde_solution.fix_flags.valid
+    assert not baseline_solution.fix_flags.valid
 
 
 def test_integrity_pdop_threshold_invalid() -> None:
@@ -135,4 +137,35 @@ def test_integrity_insufficient_sv_no_fix() -> None:
         initial_pos_ecef_m=receiver_pos,
     )
     assert solution.fix_flags.fix_type == "NO FIX"
+    assert not solution.fix_flags.valid
+
+
+def test_integrity_raim_many_bad_invalid() -> None:
+    rng = np.random.default_rng(7)
+    constellation = SimpleGpsConstellation(SimpleGpsConfig(seed=31))
+    receiver_pos = lla_to_ecef(45.0, -110.0, 100.0)
+    sv_states = visible_sv_states(receiver_pos, constellation.get_sv_states(0.0), elevation_mask_deg=5.0)
+    measurements = _make_measurements(
+        receiver_pos,
+        4.0e-6,
+        np.zeros(3),
+        0.0,
+        sv_states,
+        rng,
+        noise_sigma_m=0.5,
+    )
+    bad_indices = np.argsort([meas.elev_deg for meas in measurements])[-3:]
+    for idx in bad_indices:
+        measurements[idx] = replace(
+            measurements[idx],
+            pr_m=measurements[idx].pr_m + 120.0,
+        )
+
+    config = IntegrityConfig(max_fde_iterations=2, elevation_mask_deg=0.0)
+    solution, _ = integrity_pvt(
+        measurements,
+        sv_states,
+        initial_pos_ecef_m=receiver_pos + 75.0,
+        config=config,
+    )
     assert not solution.fix_flags.valid

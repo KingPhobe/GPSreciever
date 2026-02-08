@@ -8,6 +8,7 @@ from typing import Mapping
 import numpy as np
 from scipy.stats import chi2
 
+from gnss_twin.integrity.raim import compute_raim
 from gnss_twin.models import DopMetrics, FixFlags, GnssMeasurement, PvtSolution, ResidualStats, SvState
 from gnss_twin.receiver.wls_pvt import WlsPvtResult, wls_pvt
 
@@ -98,6 +99,10 @@ def integrity_pvt(
     rejected: list[str] = []
     solution: WlsPvtResult | None = None
     residuals_by_sv: dict[str, float] = {}
+    raim_stat = float("nan")
+    raim_dof = 0
+    raim_threshold = float("inf")
+    raim_passed = False
     for iteration in range(cfg.max_fde_iterations + 1):
         solution = wls_pvt(
             used,
@@ -109,18 +114,33 @@ def integrity_pvt(
             return _no_fix_solution(len(measurements), mask_ok), per_sv_stats
         residuals_by_sv = solution.residuals_m
         if not residuals_by_sv:
+            raim_passed = True
             break
-        worst_sv, worst_resid = max(residuals_by_sv.items(), key=lambda item: abs(item[1]))
-        if abs(worst_resid) <= cfg.max_residual_m or iteration >= cfg.max_fde_iterations:
+        sigmas_by_sv = {meas.sv_id: meas.sigma_pr_m for meas in used}
+        raim_stat, raim_dof, raim_threshold, raim_passed = compute_raim(
+            residuals_by_sv,
+            sigmas_by_sv,
+            num_states=4,
+            alpha=cfg.chi_square_alpha,
+        )
+        if raim_passed or iteration >= cfg.max_fde_iterations:
             break
+        worst_sv, _ = max(
+            residuals_by_sv.items(),
+            key=lambda item: abs(item[1])
+            / max(float(sigmas_by_sv.get(item[0], 0.0)), 1e-3),
+        )
         rejected.append(worst_sv)
         used = [meas for meas in used if meas.sv_id != worst_sv]
         if len(used) < 4:
             return _no_fix_solution(len(measurements), mask_ok), per_sv_stats
 
     residual_stats = _compute_residual_stats(used, residuals_by_sv)
-    chi_square_threshold = _chi_square_threshold(len(used), cfg.chi_square_alpha)
-    chi_square_ok = residual_stats.chi_square <= chi_square_threshold
+    chi_square_threshold = raim_threshold if np.isfinite(raim_threshold) else _chi_square_threshold(
+        len(used),
+        cfg.chi_square_alpha,
+    )
+    chi_square_ok = raim_passed
     dop = solution.dop
     dop_ok = dop.pdop <= cfg.pdop_max and dop.gdop <= cfg.gdop_max
     valid = mask_ok and dop_ok and chi_square_ok
