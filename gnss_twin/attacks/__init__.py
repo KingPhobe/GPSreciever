@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from gnss_twin.attacks.base import AttackModel
+from gnss_twin.attacks.base import AttackDelta, AttackModel
 from gnss_twin.attacks.jamming import JamCn0DropAttack
 from gnss_twin.attacks.spoofing import SpoofClockRampAttack, SpoofPrRampAttack
 
@@ -26,8 +26,8 @@ class NoOpAttack:
         sv_state: "SvState",
         *,
         rx_truth: "ReceiverTruth",
-    ) -> "GnssMeasurement":
-        return meas
+    ) -> tuple["GnssMeasurement", AttackDelta]:
+        return meas, AttackDelta(applied=False)
 
 
 def create_attack(name: str, params: dict) -> AttackModel:
@@ -62,6 +62,7 @@ def create_attack(name: str, params: dict) -> AttackModel:
 
 __all__ = [
     "AttackModel",
+    "AttackDelta",
     "NoOpAttack",
     "JamCn0DropAttack",
     "SpoofClockRampAttack",

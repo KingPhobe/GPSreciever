@@ -24,4 +24,4 @@ class SimConfig:
     postfit_gate_sigma: float = 4.0
     use_ekf: bool = False
     attack_name: str | None = None
-    attack_params: dict[str, float] = field(default_factory=dict)
+    attack_params: dict[str, float | str] = field(default_factory=dict)

@@ -7,7 +7,7 @@ from gnss_twin.logger import load_epochs_npz
 from sim.run_static_demo import run_static_demo
 
 
-def _run_demo(tmp_path: Path, *, attack_name: str, attack_params: dict[str, float]) -> list[dict]:
+def _run_demo(tmp_path: Path, *, attack_name: str, attack_params: dict[str, float | str]) -> list[dict]:
     cfg = SimConfig(
         duration=20.0,
         use_ekf=True,

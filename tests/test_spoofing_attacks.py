@@ -46,12 +46,15 @@ def test_spoof_clock_ramp_attack() -> None:
     before = _make_measurement(sv_id="G01", t=10.0, pr_m=10_000.0, prr_mps=1.5)
     after = _make_measurement(sv_id="G01", t=25.0, pr_m=10_000.0, prr_mps=1.5)
 
-    unchanged = attack.apply(before, sv_state, rx_truth=rx_truth)
+    unchanged, delta = attack.apply(before, sv_state, rx_truth=rx_truth)
     assert unchanged is before
+    assert not delta.applied
 
-    modified = attack.apply(after, sv_state, rx_truth=rx_truth)
+    modified, delta = attack.apply(after, sv_state, rx_truth=rx_truth)
     assert modified.pr_m == 10_000.0 + (25.0 - 20.0) * 2.0
     assert modified.prr_mps == 1.5 + 2.0
+    assert delta.applied
+    assert delta.pr_bias_m == (25.0 - 20.0) * 2.0
 
 
 def test_spoof_pr_ramp_attack_targets_single_sv() -> None:
@@ -62,12 +65,14 @@ def test_spoof_pr_ramp_attack_targets_single_sv() -> None:
     target = _make_measurement(sv_id="G02", t=30.0, pr_m=20_000.0, prr_mps=0.5)
     other = _make_measurement(sv_id="G01", t=30.0, pr_m=20_000.0, prr_mps=0.5)
 
-    modified = attack.apply(target, sv_state, rx_truth=rx_truth)
+    modified, delta = attack.apply(target, sv_state, rx_truth=rx_truth)
     assert modified.pr_m == 20_000.0 + (30.0 - 20.0) * 3.0
     assert modified.prr_mps == 0.5 + 3.0
+    assert delta.applied
 
-    untouched = attack.apply(other, sv_state, rx_truth=rx_truth)
+    untouched, delta = attack.apply(other, sv_state, rx_truth=rx_truth)
     assert untouched is other
+    assert not delta.applied
 
 
 def test_create_attack_requires_target_sv() -> None:
@@ -77,3 +82,8 @@ def test_create_attack_requires_target_sv() -> None:
         assert "target_sv" in str(exc)
     else:
         raise AssertionError("Expected ValueError for missing target_sv")
+
+
+def test_create_attack_returns_spoof_clock_ramp() -> None:
+    attack = create_attack("spoof_clock_ramp", {"start_t": 10.0, "ramp_rate_mps": 2.5})
+    assert isinstance(attack, SpoofClockRampAttack)

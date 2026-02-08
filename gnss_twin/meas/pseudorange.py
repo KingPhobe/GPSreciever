@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from gnss_twin.attacks import AttackModel
+from gnss_twin.attacks.base import AttackReport
 from gnss_twin.models import Constellation, GnssMeasurement, MeasurementSource, ReceiverTruth
 from gnss_twin.meas.clock_models import RandomWalkClock
 from gnss_twin.meas.iono_klobuchar import klobuchar_delay_m
@@ -64,6 +65,7 @@ class SyntheticMeasurementSource(MeasurementSource):
 
     _last_t: float | None = field(init=False, default=None)
     _clock_model: RandomWalkClock = field(init=False)
+    last_attack_report: AttackReport = field(init=False, default_factory=AttackReport)
 
     def __post_init__(self) -> None:
         if self.clock_model is None:
@@ -87,6 +89,7 @@ class SyntheticMeasurementSource(MeasurementSource):
     def get_measurements(self, t: float) -> list[GnssMeasurement]:
         sv_states = self.constellation.get_sv_states(t)
         measurements: list[GnssMeasurement] = []
+        attack_report = AttackReport()
         if self._last_t is None:
             dt = 0.0
         else:
@@ -170,6 +173,11 @@ class SyntheticMeasurementSource(MeasurementSource):
                 flags={"healthy": cn0_dbhz >= self.healthy_cn0_dbhz},
             )
             for attack in self.attacks:
-                meas = attack.apply(meas, state, rx_truth=self.receiver_truth)
+                meas, delta = attack.apply(meas, state, rx_truth=self.receiver_truth)
+                if delta.applied:
+                    attack_report.applied_count += 1
+                    attack_report.pr_bias_sum_m += delta.pr_bias_m
+                    attack_report.prr_bias_sum_mps += delta.prr_bias_mps
             measurements.append(meas)
+        self.last_attack_report = attack_report
         return measurements

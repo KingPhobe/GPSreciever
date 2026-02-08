@@ -21,7 +21,6 @@ from gnss_twin.models import (
     SvState,
 )
 from gnss_twin.meas.pseudorange import SyntheticMeasurementSource
-from gnss_twin.plots import save_run_plots
 from gnss_twin.runtime import Engine
 from gnss_twin.sat.visibility import visible_sv_states
 from gnss_twin.utils.angles import elev_az_from_rx_sv
@@ -111,6 +110,8 @@ def run_static_demo(cfg: SimConfig, run_dir: Path, save_figs: bool = True) -> Pa
 
     run_dir.mkdir(parents=True, exist_ok=True)
     if save_figs:
+        from gnss_twin.plots import save_run_plots
+
         output_dir = save_run_plots(epochs, out_dir=run_dir.parent, run_name=run_dir.name)
     else:
         output_dir = run_dir
@@ -137,15 +138,13 @@ def main() -> None:
         default=[],
         help="Attack parameter in key=value form (repeatable).",
     )
+    parser.add_argument(
+        "--no-plots",
+        action="store_true",
+        help="Disable saving run plots.",
+    )
     args = parser.parse_args()
-    attack_params: dict[str, float] = {}
-    for raw_param in args.attack_param:
-        if "=" not in raw_param:
-            raise ValueError(f"Invalid --attack-param '{raw_param}'; expected key=value.")
-        key, value = raw_param.split("=", 1)
-        if not key:
-            raise ValueError("Attack parameter key cannot be empty.")
-        attack_params[key] = float(value)
+    attack_params = _parse_attack_params(args.attack_param, args.attack_name)
     cfg = SimConfig(
         duration=args.duration_s,
         use_ekf=args.use_ekf,
@@ -154,9 +153,32 @@ def main() -> None:
     )
     run_name = args.run_name or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     run_dir = Path(args.out_dir) / run_name
-    epoch_log_path = run_static_demo(cfg, run_dir, save_figs=True)
+    epoch_log_path = run_static_demo(cfg, run_dir, save_figs=not args.no_plots)
     print(f"Saved outputs to {epoch_log_path.parent}")
 
 
 if __name__ == "__main__":
     main()
+
+
+def _parse_attack_params(raw_params: list[str], attack_name: str) -> dict[str, float | str]:
+    params: dict[str, float | str] = {}
+    for raw_param in raw_params:
+        if "=" not in raw_param:
+            raise ValueError(f"Invalid --attack-param '{raw_param}'; expected key=value.")
+        key, value = raw_param.split("=", 1)
+        if not key:
+            raise ValueError("Attack parameter key cannot be empty.")
+        params[key] = _coerce_param_value(value)
+    if attack_name.lower() == "spoof_pr_ramp":
+        target_sv = params.get("target_sv")
+        if not target_sv or str(target_sv).strip() == "":
+            raise ValueError("spoof_pr_ramp requires --attack-param target_sv=G##")
+    return params
+
+
+def _coerce_param_value(value: str) -> float | str:
+    try:
+        return float(value)
+    except ValueError:
+        return value

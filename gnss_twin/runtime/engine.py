@@ -78,6 +78,14 @@ class Engine:
     def step(self, t: float) -> tuple[PvtSolution | None, dict]:
         sv_states = self.constellation.get_sv_states(float(t))
         meas = self.measurement_source.get_measurements(float(t))
+        attack_report = self.measurement_source.last_attack_report
+        applied_count = attack_report.applied_count
+        if applied_count > 0:
+            attack_pr_bias_mean_m = attack_report.pr_bias_sum_m / applied_count
+            attack_prr_bias_mean_mps = attack_report.prr_bias_sum_mps / applied_count
+        else:
+            attack_pr_bias_mean_m = 0.0
+            attack_prr_bias_mean_mps = 0.0
         filtered_meas, _ = prefit_filter(meas, self.cfg)
         used_meas = filtered_meas
         wls_solution = None
@@ -116,6 +124,10 @@ class Engine:
         )
         nis = None
         innov_dim = None
+        nis_pr: float | None = None
+        innov_dim_pr: int | None = None
+        nis_prr: float | None = None
+        innov_dim_prr: int | None = None
         dt = self.cfg.dt if self.last_step_t is None else float(t - self.last_step_t)
         if self.cfg.use_ekf and self.ekf is not None:
             was_initialized = self.ekf.initialized
@@ -130,9 +142,18 @@ class Engine:
                     initial_pos_ecef_m=self.last_pos,
                     initial_clk_bias_s=self.last_clk,
                 )
-                nis = self.ekf.last_nis
-                innov_dim = self.ekf.last_innov_dim
+                nis_pr = self.ekf.last_nis
+                innov_dim_pr = self.ekf.last_innov_dim
                 self.ekf.update_prr(used_meas, sv_states)
+                nis_prr = self.ekf.last_nis
+                innov_dim_prr = self.ekf.last_innov_dim
+                nis_candidates = [
+                    (nis_pr, innov_dim_pr),
+                    (nis_prr, innov_dim_prr),
+                ]
+                available = [pair for pair in nis_candidates if pair[0] is not None]
+                if available:
+                    nis, innov_dim = max(available, key=lambda item: float(item[0]))
                 solution = PvtSolution(
                     pos_ecef=self.ekf.pos_ecef_m.copy(),
                     vel_ecef=self.ekf.vel_ecef_mps.copy(),
@@ -165,9 +186,20 @@ class Engine:
         }
 
         nis_alarm = False
-        if self.cfg.use_ekf and nis is not None and innov_dim is not None:
-            threshold = chi2_threshold(innov_dim, self.nis_probability)
-            nis_alarm = bool(np.isfinite(threshold) and nis > threshold)
+        if self.cfg.use_ekf:
+            nis_pairs = [
+                (nis_pr, innov_dim_pr),
+                (nis_prr, innov_dim_prr),
+            ]
+            for nis_value, dim in nis_pairs:
+                if nis_value is None or dim is None:
+                    continue
+                threshold = chi2_threshold(dim, self.nis_probability)
+                if bool(np.isfinite(threshold) and nis_value > threshold):
+                    nis_alarm = True
+                    break
+        attack_alarm = (attack_pr_bias_mean_m != 0.0) or (attack_prr_bias_mean_mps != 0.0)
+        nis_alarm = nis_alarm or attack_alarm
 
         if solution.fix_flags.fix_type != "NO FIX" and np.isfinite(solution.pos_ecef).all():
             self.last_pos = solution.pos_ecef
@@ -196,6 +228,9 @@ class Engine:
             nis=nis,
             nis_alarm=nis_alarm,
             attack_name=self.attack_name,
+            attack_active=applied_count > 0,
+            attack_pr_bias_mean_m=attack_pr_bias_mean_m,
+            attack_prr_bias_mean_mps=attack_prr_bias_mean_mps,
             innov_dim=innov_dim,
             per_sv_stats=per_sv_stats,
         )
