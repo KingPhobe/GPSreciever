@@ -1,0 +1,15 @@
+{
+  "name": "jam_cn0_drop",
+  "duration_s": 60,
+  "rng_seed": 7,
+  "use_ekf": true,
+  "attack_name": "jam_cn0_drop",
+  "attack_params": {
+    "start_t": 15.0,
+    "cn0_drop_db": 18.0,
+    "sigma_pr_scale": 6.0,
+    "sigma_prr_scale": 4.0
+  },
+  "cn0_min_dbhz": 26.0,
+  "sigma_pr_max_m": 30.0
+}

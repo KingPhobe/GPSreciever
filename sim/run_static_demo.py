@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -34,15 +35,7 @@ from gnss_twin.utils.angles import elev_az_from_rx_sv
 from gnss_twin.utils.wgs84 import ecef_to_lla, lla_to_ecef
 
 
-def run_demo(
-    *,
-    duration_s: float,
-    out_dir: str | Path,
-    run_name: str | None = None,
-    use_ekf: bool = False,
-    attack_name: str = "none",
-    attack_params: dict[str, float] | None = None,
-) -> Path:
+def run_static_demo(cfg: SimConfig, run_dir: Path, save_figs: bool = True) -> Path:
     receiver_lla = (37.4275, -122.1697, 30.0)
     receiver_truth = lla_to_ecef(*receiver_lla)
     receiver_clock = 4.2e-6
@@ -108,13 +101,17 @@ def run_demo(
     elev_deg, az_deg = elev_az_from_rx_sv(receiver_truth, sv_overhead)
     print(f"Sample elevation/azimuth (deg): ({elev_deg:.2f}, {az_deg:.2f})")
 
-    constellation = SimpleGpsConstellation(SimpleGpsConfig(seed=42))
-    params = attack_params or {}
-    attacks = [] if attack_name.lower() == "none" else [create_attack(attack_name, params)]
+    seed = cfg.seed if cfg.seed is not None else 42
+    constellation = SimpleGpsConstellation(SimpleGpsConfig(seed=seed))
+    attack_name = cfg.attack_name or "none"
+    attacks = [] if attack_name.lower() == "none" else [create_attack(attack_name, cfg.attack_params)]
+    rng = np.random.default_rng(seed)
     measurement_source = SyntheticMeasurementSource(
         constellation=constellation,
         receiver_truth=dummy_truth,
         cn0_zenith_dbhz=47.0,
+        cn0_min_dbhz=cfg.cn0_min_dbhz,
+        rng=rng,
         attacks=attacks,
     )
     first_epoch_meas = measurement_source.get_measurements(0.0)
@@ -125,10 +122,10 @@ def run_demo(
         )
     for t in range(5):
         sv_states = constellation.get_sv_states(float(t))
-        visible = visible_sv_states(receiver_truth, sv_states, elevation_mask_deg=10.0)
+        visible = visible_sv_states(receiver_truth, sv_states, elevation_mask_deg=cfg.elev_mask_deg)
         print(f"{len(visible)} visible satellites at t={t}s")
 
-    times = np.arange(0.0, duration_s, 1.0)
+    times = np.arange(0.0, cfg.duration, cfg.dt)
     rms_errors: list[float] = []
     pos_errors: list[float] = []
     pdop_series: list[float] = []
@@ -141,15 +138,14 @@ def run_demo(
     integrity_cfg = IntegrityConfig()
     nis_probability = 0.95
     tracker = SvTracker(integrity_cfg)
-    sim_cfg = SimConfig(use_ekf=use_ekf)
-    tracking_state = TrackingState(sim_cfg)
-    ekf = EkfNav() if sim_cfg.use_ekf else None
+    tracking_state = TrackingState(cfg)
+    ekf = EkfNav() if cfg.use_ekf else None
     epochs: list[EpochLog] = []
     for t in times:
         sv_states = constellation.get_sv_states(float(t))
         sv_by_id = {state.sv_id: state for state in sv_states}
         meas = measurement_source.get_measurements(float(t))
-        filtered_meas, _ = prefit_filter(meas, sim_cfg)
+        filtered_meas, _ = prefit_filter(meas, cfg)
         used_meas = filtered_meas
         wls_solution = None
         if len(used_meas) >= 4:
@@ -164,7 +160,7 @@ def run_demo(
                 offender = postfit_gate(
                     wls_solution.residuals_m,
                     sigmas_by_sv,
-                    gate=sim_cfg.postfit_gate_sigma,
+                    gate=cfg.postfit_gate_sigma,
                 )
                 if offender:
                     used_meas = [m for m in used_meas if m.sv_id != offender]
@@ -195,12 +191,12 @@ def run_demo(
         )
         nis = None
         innov_dim = None
-        if sim_cfg.use_ekf and ekf is not None:
+        if cfg.use_ekf and ekf is not None:
             was_initialized = ekf.initialized
             if not ekf.initialized and wls_solution is not None:
                 ekf.initialize_from_wls(wls_solution)
             if ekf.initialized and was_initialized:
-                ekf.predict(sim_cfg.dt)
+                ekf.predict(cfg.dt)
             if ekf.initialized:
                 ekf.update_pseudorange(
                     used_meas,
@@ -262,7 +258,7 @@ def run_demo(
                 drift_series.append(solution.clk_drift_sps)
 
         nis_alarm = False
-        if sim_cfg.use_ekf and nis is not None and innov_dim is not None:
+        if cfg.use_ekf and nis is not None and innov_dim is not None:
             threshold = chi2_threshold(innov_dim, nis_probability)
             nis_alarm = bool(np.isfinite(threshold) and nis > threshold)
 
@@ -279,10 +275,14 @@ def run_demo(
             )
         )
 
-    output_dir = save_run_plots(epochs, out_dir=out_dir, run_name=run_name)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    if save_figs:
+        output_dir = save_run_plots(epochs, out_dir=run_dir.parent, run_name=run_dir.name)
+    else:
+        output_dir = run_dir
     save_epochs_npz(output_dir / "epoch_logs.npz", epochs)
     save_epochs_csv(output_dir / "epoch_logs.csv", epochs)
-    return output_dir
+    return output_dir / "epoch_logs.csv"
 
 
 def main() -> None:
@@ -312,15 +312,16 @@ def main() -> None:
         if not key:
             raise ValueError("Attack parameter key cannot be empty.")
         attack_params[key] = float(value)
-    output_dir = run_demo(
-        duration_s=args.duration_s,
-        out_dir=args.out_dir,
-        run_name=args.run_name,
+    cfg = SimConfig(
+        duration=args.duration_s,
         use_ekf=args.use_ekf,
         attack_name=args.attack_name,
         attack_params=attack_params,
     )
-    print(f"Saved outputs to {output_dir}")
+    run_name = args.run_name or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    run_dir = Path(args.out_dir) / run_name
+    epoch_log_path = run_static_demo(cfg, run_dir, save_figs=True)
+    print(f"Saved outputs to {epoch_log_path.parent}")
 
 
 if __name__ == "__main__":

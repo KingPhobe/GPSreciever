@@ -1,0 +1,8 @@
+{
+  "name": "baseline",
+  "duration_s": 60,
+  "rng_seed": 42,
+  "use_ekf": true,
+  "attack_name": "none",
+  "attack_params": {}
+}
