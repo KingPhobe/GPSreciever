@@ -13,7 +13,7 @@ _CSV_HEADER = (
     "t,pos_x,pos_y,pos_z,vel_x,vel_y,vel_z,clk_bias_s,clk_drift_sps,"
     "gdop,pdop,hdop,vdop,residual_rms_m,residual_mean_m,residual_max_m,chi_square,"
     "nis,nis_alarm,innov_dim,"
-    "fix_type,valid\n"
+    "fix_type,valid,sats_used\n"
 )
 
 
@@ -57,7 +57,7 @@ def _epoch_to_csv_line(epoch: EpochLog) -> str:
     solution = epoch.solution
     if solution is None:
         return (
-            f"{epoch.t}," + ",".join(["" for _ in range(21)]) + "\n"
+            f"{epoch.t}," + ",".join(["" for _ in range(22)]) + "\n"
         )
 
     pos = solution.pos_ecef
@@ -75,5 +75,5 @@ def _epoch_to_csv_line(epoch: EpochLog) -> str:
         f"{dop.gdop},{dop.pdop},{dop.hdop},{dop.vdop},"
         f"{residuals.rms_m},{residuals.mean_m},{residuals.max_m},{residuals.chi_square},"
         f"{nis},{int(epoch.nis_alarm)},{innov_dim},"
-        f"{flags.fix_type},{int(flags.valid)}\n"
+        f"{flags.fix_type},{int(flags.valid)},{flags.sv_count}\n"
     )
