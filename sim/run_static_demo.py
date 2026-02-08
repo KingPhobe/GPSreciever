@@ -21,6 +21,7 @@ from gnss_twin.models import (
 )
 from gnss_twin.meas.pseudorange import LIGHT_SPEED_MPS, SyntheticMeasurementSource, geometric_range_m
 from gnss_twin.integrity.flags import IntegrityConfig, SvTracker, integrity_pvt
+from gnss_twin.integrity.raim import compute_raim
 from gnss_twin.plots import save_run_plots
 from gnss_twin.receiver.gating import postfit_gate, prefit_filter
 from gnss_twin.receiver.ekf_nav import EkfNav
@@ -211,6 +212,24 @@ def run_demo(
         for sv_id, track_state in tracking_states.items():
             per_sv_stats.setdefault(sv_id, {})
             per_sv_stats[sv_id]["locked"] = 1.0 if track_state.locked else 0.0
+        sigmas_by_sv = {meas.sv_id: meas.sigma_pr_m for meas in used_meas}
+        residuals_by_sv = {
+            sv_id: float(stats["residual_m"])
+            for sv_id, stats in per_sv_stats.items()
+            if sv_id in sigmas_by_sv and np.isfinite(stats.get("residual_m", float("nan")))
+        }
+        t_stat, dof, threshold, passed = compute_raim(
+            residuals_by_sv,
+            sigmas_by_sv,
+            num_states=4,
+            alpha=integrity_cfg.chi_square_alpha,
+        )
+        per_sv_stats["_raim"] = {
+            "t_stat": t_stat,
+            "dof": float(dof),
+            "threshold": threshold,
+            "pass": 1.0 if passed else 0.0,
+        }
         fix_type = solution.fix_flags.fix_type
         fix_valid_series.append(1.0 if solution.fix_flags.valid else 0.0)
         fix_type_series.append({"NO FIX": 0.0, "2D": 1.0, "3D": 2.0}.get(fix_type, 0.0))
