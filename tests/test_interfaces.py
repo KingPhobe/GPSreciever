@@ -73,6 +73,9 @@ def test_dataclass_fields() -> None:
         "nis",
         "nis_alarm",
         "attack_name",
+        "attack_active",
+        "attack_pr_bias_mean_m",
+        "attack_prr_bias_mean_mps",
         "innov_dim",
         "per_sv_stats",
     ]

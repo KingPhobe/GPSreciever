@@ -48,12 +48,14 @@ def test_jamming_attack_applies_cn0_drop_and_sigma_inflation() -> None:
     before = _make_measurement(sv_id="G01", t=10.0, cn0_dbhz=40.0, sigma_pr_m=1.0)
     after = _make_measurement(sv_id="G01", t=25.0, cn0_dbhz=40.0, sigma_pr_m=1.0)
 
-    unchanged = attack.apply(before, sv_state, rx_truth=rx_truth)
+    unchanged, delta = attack.apply(before, sv_state, rx_truth=rx_truth)
     assert unchanged is before
+    assert not delta.applied
 
-    modified = attack.apply(after, sv_state, rx_truth=rx_truth)
+    modified, delta = attack.apply(after, sv_state, rx_truth=rx_truth)
     assert modified.cn0_dbhz == 30.0
     assert modified.sigma_pr_m == 5.0
+    assert delta.applied
 
 
 def test_jamming_attack_triggers_gating_rejections() -> None:
@@ -69,7 +71,7 @@ def test_jamming_attack_triggers_gating_rejections() -> None:
     sv_state = _make_sv_state("G01", 10.0)
 
     kept_before, _ = prefit_filter(measurements, cfg)
-    jammed = [attack.apply(meas, sv_state, rx_truth=rx_truth) for meas in measurements]
+    jammed = [attack.apply(meas, sv_state, rx_truth=rx_truth)[0] for meas in measurements]
     kept_after, _ = prefit_filter(jammed, cfg)
 
     assert len(kept_before) == len(measurements)

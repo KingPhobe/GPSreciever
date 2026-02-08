@@ -35,6 +35,9 @@ EPOCH_CSV_COLUMNS = [
     "residual_max_m",
     "chi_square",
     "innov_dim",
+    "attack_active",
+    "attack_pr_bias_mean_m",
+    "attack_prr_bias_mean_mps",
 ]
 _CSV_HEADER = ",".join(EPOCH_CSV_COLUMNS) + "\n"
 
@@ -122,6 +125,9 @@ def _epoch_to_csv_line(epoch: EpochLog) -> str:
         _format_value(residuals.max_m if residuals else None),
         _format_value(residuals.chi_square if residuals else None),
         _format_value(epoch.innov_dim),
+        _format_value(int(epoch.attack_active)),
+        _format_value(epoch.attack_pr_bias_mean_m),
+        _format_value(epoch.attack_prr_bias_mean_mps),
     ]
     return ",".join(str(value) for value in row) + "\n"
 

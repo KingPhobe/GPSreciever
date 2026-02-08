@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-from gnss_twin.attacks.base import AttackModel
+from gnss_twin.attacks.base import AttackDelta, AttackModel
 
 if TYPE_CHECKING:
     from gnss_twin.models import GnssMeasurement, ReceiverTruth, SvState
@@ -27,14 +27,17 @@ class SpoofClockRampAttack:
         sv_state: "SvState",
         *,
         rx_truth: "ReceiverTruth",
-    ) -> "GnssMeasurement":
+    ) -> tuple["GnssMeasurement", AttackDelta]:
         if meas.t < self.start_t:
-            return meas
+            return meas, AttackDelta(applied=False)
         bias_m = (meas.t - self.start_t) * self.ramp_rate_mps
         prr_mps = (
             None if meas.prr_mps is None else meas.prr_mps + self.ramp_rate_mps
         )
-        return replace(meas, pr_m=meas.pr_m + bias_m, prr_mps=prr_mps)
+        return (
+            replace(meas, pr_m=meas.pr_m + bias_m, prr_mps=prr_mps),
+            AttackDelta(applied=True, pr_bias_m=bias_m, prr_bias_mps=self.ramp_rate_mps),
+        )
 
 
 @dataclass
@@ -54,16 +57,19 @@ class SpoofPrRampAttack:
         sv_state: "SvState",
         *,
         rx_truth: "ReceiverTruth",
-    ) -> "GnssMeasurement":
+    ) -> tuple["GnssMeasurement", AttackDelta]:
         if meas.sv_id != self.target_sv:
-            return meas
+            return meas, AttackDelta(applied=False)
         if meas.t < self.start_t:
-            return meas
+            return meas, AttackDelta(applied=False)
         bias_m = (meas.t - self.start_t) * self.ramp_rate_mps
         prr_mps = (
             None if meas.prr_mps is None else meas.prr_mps + self.ramp_rate_mps
         )
-        return replace(meas, pr_m=meas.pr_m + bias_m, prr_mps=prr_mps)
+        return (
+            replace(meas, pr_m=meas.pr_m + bias_m, prr_mps=prr_mps),
+            AttackDelta(applied=True, pr_bias_m=bias_m, prr_bias_mps=self.ramp_rate_mps),
+        )
 
 
 __all__ = ["SpoofClockRampAttack", "SpoofPrRampAttack", "AttackModel"]

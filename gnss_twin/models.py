@@ -142,6 +142,9 @@ class EpochLog:
     nis: float | None = None
     nis_alarm: bool = False
     attack_name: str | None = None
+    attack_active: bool = False
+    attack_pr_bias_mean_m: float = 0.0
+    attack_prr_bias_mean_mps: float = 0.0
     innov_dim: int | None = None
     per_sv_stats: Mapping[str, Mapping[str, float]] = field(default_factory=dict)
 

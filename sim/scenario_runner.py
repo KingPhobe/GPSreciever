@@ -33,7 +33,7 @@ def run_scenarios(
         run_dir = run_root / f"{timestamp}_{_slugify(scenario_name)}"
         cfg = _build_sim_config(scenario)
         epoch_log_path = run_static_demo(cfg, run_dir, save_figs=save_figs)
-        metrics = _summary_from_epoch_logs(epoch_log_path)
+        metrics = _summary_from_epoch_logs(epoch_log_path, attack_start_t=_attack_start_t(cfg))
         summary = {
             "scenario": scenario_name,
             "run_dir": str(run_dir),
@@ -76,13 +76,17 @@ def _build_sim_config(scenario: dict[str, Any]) -> SimConfig:
     return SimConfig(**cfg_kwargs)
 
 
-def _summary_from_epoch_logs(path: Path) -> dict[str, float]:
+def _summary_from_epoch_logs(path: Path, *, attack_start_t: float | None = None) -> dict[str, float]:
     rows = _load_epoch_rows(path)
     pos = _positions_from_rows(rows)
     pos_err_rms = _wander_rms(pos)
     residual_rms = _float_column(rows, "residual_rms_m")
     sats_used = _float_column(rows, "sats_used")
     nis_alarm = _float_column(rows, "nis_alarm")
+    attack_active = _float_column(rows, "attack_active")
+    attack_pr_bias = _float_column(rows, "attack_pr_bias_mean_m")
+    attack_prr_bias = _float_column(rows, "attack_prr_bias_mean_mps")
+    nis_after_start = _float_column_after_start(rows, "nis_alarm", attack_start_t)
 
     return {
         "pos_err_rms": pos_err_rms,
@@ -91,6 +95,11 @@ def _summary_from_epoch_logs(path: Path) -> dict[str, float]:
         "sats_used_mean": _safe_mean(sats_used),
         "sats_used_min": _safe_min(sats_used),
         "nis_alarm_rate": _safe_mean(nis_alarm),
+        "attack_active_rate": _safe_mean(attack_active),
+        "attack_pr_bias_mean_m_mean": _safe_mean(attack_pr_bias),
+        "attack_pr_bias_mean_m_max": _safe_max(attack_pr_bias),
+        "attack_prr_bias_mean_mps_mean": _safe_mean(attack_prr_bias),
+        "nis_alarm_rate_after_start": _safe_mean(nis_after_start),
     }
 
 
@@ -126,6 +135,30 @@ def _float_column(rows: list[dict[str, str]], key: str) -> np.ndarray:
     for row in rows:
         value = _parse_float(row.get(key))
         if value is not None and math.isfinite(value):
+            values.append(value)
+    if not values:
+        return np.array([], dtype=float)
+    return np.array(values, dtype=float)
+
+
+def _float_column_after_start(
+    rows: list[dict[str, str]],
+    key: str,
+    start_t: float | None,
+) -> np.ndarray:
+    if start_t is None:
+        return np.array([], dtype=float)
+    values = []
+    for row in rows:
+        t_value = _parse_float(row.get("t"))
+        value = _parse_float(row.get(key))
+        if (
+            t_value is not None
+            and value is not None
+            and math.isfinite(t_value)
+            and math.isfinite(value)
+            and t_value >= start_t
+        ):
             values.append(value)
     if not values:
         return np.array([], dtype=float)
@@ -170,6 +203,11 @@ def _append_summary_csv(path: Path, summary: dict[str, Any]) -> None:
         "sats_used_mean",
         "sats_used_min",
         "nis_alarm_rate",
+        "attack_active_rate",
+        "attack_pr_bias_mean_m_mean",
+        "attack_pr_bias_mean_m_max",
+        "attack_prr_bias_mean_mps_mean",
+        "nis_alarm_rate_after_start",
     ]
     write_header = not path.exists()
     with path.open("a", encoding="utf-8", newline="") as handle:
@@ -181,6 +219,16 @@ def _append_summary_csv(path: Path, summary: dict[str, Any]) -> None:
 
 def _slugify(name: str) -> str:
     return "".join(char if char.isalnum() or char in "-_." else "_" for char in name.lower())
+
+
+def _attack_start_t(cfg: SimConfig) -> float | None:
+    start_t = cfg.attack_params.get("start_t") if cfg.attack_params else None
+    if start_t is None:
+        return None
+    try:
+        return float(start_t)
+    except (TypeError, ValueError):
+        return None
 
 
 def main() -> None:

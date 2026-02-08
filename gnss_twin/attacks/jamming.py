@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-from gnss_twin.attacks.base import AttackModel
+from gnss_twin.attacks.base import AttackDelta, AttackModel
 
 if TYPE_CHECKING:
     from gnss_twin.models import GnssMeasurement, ReceiverTruth, SvState
@@ -29,9 +29,9 @@ class JamCn0DropAttack:
         sv_state: "SvState",
         *,
         rx_truth: "ReceiverTruth",
-    ) -> "GnssMeasurement":
+    ) -> tuple["GnssMeasurement", AttackDelta]:
         if meas.t < self.start_t:
-            return meas
+            return meas, AttackDelta(applied=False)
         updates: dict[str, float] = {
             "cn0_dbhz": max(0.0, meas.cn0_dbhz - self.cn0_drop_db),
             "sigma_pr_m": meas.sigma_pr_m * self.sigma_pr_scale,
@@ -40,7 +40,7 @@ class JamCn0DropAttack:
             sigma_prr_mps = getattr(meas, "sigma_prr_mps")
             if sigma_prr_mps is not None:
                 updates["sigma_prr_mps"] = sigma_prr_mps * self.sigma_prr_scale
-        return replace(meas, **updates)
+        return replace(meas, **updates), AttackDelta(applied=True)
 
 
 __all__ = ["JamCn0DropAttack", "AttackModel"]
