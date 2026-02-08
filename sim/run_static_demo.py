@@ -22,7 +22,7 @@ from gnss_twin.models import (
 )
 from gnss_twin.meas.pseudorange import LIGHT_SPEED_MPS, SyntheticMeasurementSource, geometric_range_m
 from gnss_twin.integrity.flags import IntegrityConfig, SvTracker, integrity_pvt
-from gnss_twin.integrity.raim import compute_raim
+from gnss_twin.integrity.raim import chi2_threshold, compute_raim
 from gnss_twin.plots import save_run_plots
 from gnss_twin.receiver.gating import postfit_gate, prefit_filter
 from gnss_twin.receiver.ekf_nav import EkfNav
@@ -139,6 +139,7 @@ def run_demo(
     last_pos = receiver_truth + 100.0
     last_clk = receiver_clock
     integrity_cfg = IntegrityConfig()
+    nis_probability = 0.95
     tracker = SvTracker(integrity_cfg)
     sim_cfg = SimConfig(use_ekf=use_ekf)
     tracking_state = TrackingState(sim_cfg)
@@ -192,6 +193,8 @@ def run_demo(
             config=integrity_cfg,
             tracker=tracker,
         )
+        nis = None
+        innov_dim = None
         if sim_cfg.use_ekf and ekf is not None:
             was_initialized = ekf.initialized
             if not ekf.initialized and wls_solution is not None:
@@ -205,6 +208,8 @@ def run_demo(
                     initial_pos_ecef_m=last_pos,
                     initial_clk_bias_s=last_clk,
                 )
+                nis = ekf.last_nis
+                innov_dim = ekf.last_innov_dim
                 ekf.update_prr(used_meas, sv_states)
                 solution = PvtSolution(
                     pos_ecef=ekf.pos_ecef_m.copy(),
@@ -256,12 +261,20 @@ def run_demo(
                 speed_series.append(float(np.linalg.norm(solution.vel_ecef)))
                 drift_series.append(solution.clk_drift_sps)
 
+        nis_alarm = False
+        if sim_cfg.use_ekf and nis is not None and innov_dim is not None:
+            threshold = chi2_threshold(innov_dim, nis_probability)
+            nis_alarm = bool(np.isfinite(threshold) and nis > threshold)
+
         epochs.append(
             EpochLog(
                 t=float(t),
                 meas=meas,
                 solution=solution,
                 truth=dummy_truth,
+                nis=nis,
+                nis_alarm=nis_alarm,
+                innov_dim=innov_dim,
                 per_sv_stats=per_sv_stats,
             )
         )

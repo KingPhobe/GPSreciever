@@ -23,6 +23,14 @@ class IntegrityReport:
     fde_used: bool
 
 
+def chi2_threshold(dof: int, p: float) -> float:
+    """Return chi-square threshold for the given probability and dof."""
+
+    if dof <= 0:
+        return float("inf")
+    return float(chi2.ppf(p, dof))
+
+
 def compute_raim(
     residuals_by_sv: Mapping[str, float],
     sigmas_by_sv: Mapping[str, float],
@@ -37,7 +45,7 @@ def compute_raim(
         terms.append((float(residual) / sigma) ** 2)
     t_stat = float(np.sum(terms)) if terms else float("nan")
     dof = len(terms) - num_states
-    threshold = float(chi2.ppf(1.0 - alpha, dof)) if dof > 0 else float("inf")
+    threshold = chi2_threshold(dof, 1.0 - alpha)
     pass_bool = bool(dof > 0 and np.isfinite(t_stat) and t_stat <= threshold)
     return t_stat, dof, threshold, pass_bool
 
