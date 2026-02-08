@@ -22,7 +22,9 @@ from gnss_twin.models import (
 from gnss_twin.meas.pseudorange import LIGHT_SPEED_MPS, SyntheticMeasurementSource, geometric_range_m
 from gnss_twin.integrity.flags import IntegrityConfig, SvTracker, integrity_pvt
 from gnss_twin.plots import save_run_plots
+from gnss_twin.receiver.gating import postfit_gate, prefit_filter
 from gnss_twin.receiver.tracking_state import TrackingState
+from gnss_twin.receiver.wls_pvt import wls_pvt
 from gnss_twin.sat.simple_gps import SimpleGpsConfig, SimpleGpsConstellation
 from gnss_twin.sat.visibility import visible_sv_states
 from gnss_twin.utils.angles import elev_az_from_rx_sv
@@ -131,6 +133,31 @@ def run_demo(*, duration_s: float, out_dir: str | Path, run_name: str | None = N
         sv_states = constellation.get_sv_states(float(t))
         sv_by_id = {state.sv_id: state for state in sv_states}
         meas = measurement_source.get_measurements(float(t))
+        filtered_meas, _ = prefit_filter(meas, sim_cfg)
+        used_meas = filtered_meas
+        if len(used_meas) >= 4:
+            wls_solution = wls_pvt(
+                used_meas,
+                sv_states,
+                initial_pos_ecef_m=last_pos,
+                initial_clk_bias_s=last_clk,
+            )
+            if wls_solution is not None:
+                sigmas_by_sv = {m.sv_id: m.sigma_pr_m for m in used_meas}
+                offender = postfit_gate(
+                    wls_solution.residuals_m,
+                    sigmas_by_sv,
+                    gate=sim_cfg.postfit_gate_sigma,
+                )
+                if offender:
+                    used_meas = [m for m in used_meas if m.sv_id != offender]
+                    if len(used_meas) >= 4:
+                        wls_pvt(
+                            used_meas,
+                            sv_states,
+                            initial_pos_ecef_m=last_pos,
+                            initial_clk_bias_s=last_clk,
+                        )
         tracking_states = tracking_state.update(meas)
         errors = []
         for m in meas:
@@ -142,7 +169,7 @@ def run_demo(*, duration_s: float, out_dir: str | Path, run_name: str | None = N
         rms_errors.append(rms)
 
         solution, per_sv_stats = integrity_pvt(
-            meas,
+            used_meas,
             sv_states,
             initial_pos_ecef_m=last_pos,
             initial_clk_bias_s=last_clk,
