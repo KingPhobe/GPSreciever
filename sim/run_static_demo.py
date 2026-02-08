@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
+from gnss_twin.attacks import create_attack
 from gnss_twin.config import SimConfig
 from gnss_twin.logger import save_epochs_csv, save_epochs_npz
 from gnss_twin.models import (
@@ -39,6 +40,8 @@ def run_demo(
     out_dir: str | Path,
     run_name: str | None = None,
     use_ekf: bool = False,
+    attack_name: str = "none",
+    attack_params: dict[str, float] | None = None,
 ) -> Path:
     receiver_lla = (37.4275, -122.1697, 30.0)
     receiver_truth = lla_to_ecef(*receiver_lla)
@@ -106,10 +109,13 @@ def run_demo(
     print(f"Sample elevation/azimuth (deg): ({elev_deg:.2f}, {az_deg:.2f})")
 
     constellation = SimpleGpsConstellation(SimpleGpsConfig(seed=42))
+    params = attack_params or {}
+    attacks = [] if attack_name.lower() == "none" else [create_attack(attack_name, params)]
     measurement_source = SyntheticMeasurementSource(
         constellation=constellation,
         receiver_truth=dummy_truth,
         cn0_zenith_dbhz=47.0,
+        attacks=attacks,
     )
     first_epoch_meas = measurement_source.get_measurements(0.0)
     print("First-epoch pseudoranges (m):")
@@ -272,12 +278,34 @@ def main() -> None:
     parser.add_argument("--out-dir", type=str, default="out", help="Output directory root.")
     parser.add_argument("--run-name", type=str, default=None, help="Run name for outputs.")
     parser.add_argument("--use-ekf", action="store_true", help="Enable EKF navigation filter.")
+    parser.add_argument(
+        "--attack-name",
+        type=str,
+        default="none",
+        help="Attack model name to apply (default: none).",
+    )
+    parser.add_argument(
+        "--attack-param",
+        action="append",
+        default=[],
+        help="Attack parameter in key=value form (repeatable).",
+    )
     args = parser.parse_args()
+    attack_params: dict[str, float] = {}
+    for raw_param in args.attack_param:
+        if "=" not in raw_param:
+            raise ValueError(f"Invalid --attack-param '{raw_param}'; expected key=value.")
+        key, value = raw_param.split("=", 1)
+        if not key:
+            raise ValueError("Attack parameter key cannot be empty.")
+        attack_params[key] = float(value)
     output_dir = run_demo(
         duration_s=args.duration_s,
         out_dir=args.out_dir,
         run_name=args.run_name,
         use_ekf=args.use_ekf,
+        attack_name=args.attack_name,
+        attack_params=attack_params,
     )
     print(f"Saved outputs to {output_dir}")
 

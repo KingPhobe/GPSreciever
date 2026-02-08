@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from gnss_twin.attacks import AttackModel
 from gnss_twin.models import Constellation, GnssMeasurement, MeasurementSource, ReceiverTruth
 from gnss_twin.meas.clock_models import RandomWalkClock
 from gnss_twin.meas.iono_klobuchar import klobuchar_delay_m
@@ -59,6 +60,7 @@ class SyntheticMeasurementSource(MeasurementSource):
     multipath_max_bias_m: float = 1.5
     rng: np.random.Generator = field(default_factory=np.random.default_rng)
     clock_model: RandomWalkClock | None = None
+    attacks: list[AttackModel] = field(default_factory=list)
 
     _last_t: float | None = field(init=False, default=None)
     _clock_model: RandomWalkClock = field(init=False)
@@ -155,18 +157,19 @@ class SyntheticMeasurementSource(MeasurementSource):
                 + LIGHT_SPEED_MPS * (self.receiver_clock_drift_sps - state.clk_drift_sps)
                 + prr_noise_mps
             )
-            measurements.append(
-                GnssMeasurement(
-                    sv_id=state.sv_id,
-                    t=t,
-                    pr_m=pr_m,
-                    pr_model_corr_m=model_corr_m,
-                    prr_mps=prr_mps,
-                    sigma_pr_m=sigma_pr_m,
-                    cn0_dbhz=cn0_dbhz,
-                    elev_deg=elev_deg,
-                    az_deg=az_deg,
-                    flags={"healthy": cn0_dbhz >= self.healthy_cn0_dbhz},
-                )
+            meas = GnssMeasurement(
+                sv_id=state.sv_id,
+                t=t,
+                pr_m=pr_m,
+                pr_model_corr_m=model_corr_m,
+                prr_mps=prr_mps,
+                sigma_pr_m=sigma_pr_m,
+                cn0_dbhz=cn0_dbhz,
+                elev_deg=elev_deg,
+                az_deg=az_deg,
+                flags={"healthy": cn0_dbhz >= self.healthy_cn0_dbhz},
             )
+            for attack in self.attacks:
+                meas = attack.apply(meas, state, rx_truth=self.receiver_truth)
+            measurements.append(meas)
         return measurements
