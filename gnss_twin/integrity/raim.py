@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Mapping
 
 import numpy as np
+from scipy.stats import chi2
 
 from gnss_twin.meas.models import Measurement
 from gnss_twin.receiver.solver import Solution, wls_solve
@@ -19,6 +21,25 @@ class IntegrityReport:
     threshold_m: float
     excluded_prn: int | None
     fde_used: bool
+
+
+def compute_raim(
+    residuals_by_sv: Mapping[str, float],
+    sigmas_by_sv: Mapping[str, float],
+    num_states: int = 4,
+    alpha: float = 0.01,
+) -> tuple[float, int, float, bool]:
+    """Compute a global RAIM consistency test statistic."""
+
+    terms: list[float] = []
+    for sv_id, residual in residuals_by_sv.items():
+        sigma = max(float(sigmas_by_sv.get(sv_id, 0.0)), 1e-3)
+        terms.append((float(residual) / sigma) ** 2)
+    t_stat = float(np.sum(terms)) if terms else float("nan")
+    dof = len(terms) - num_states
+    threshold = float(chi2.ppf(1.0 - alpha, dof)) if dof > 0 else float("inf")
+    pass_bool = bool(dof > 0 and np.isfinite(t_stat) and t_stat <= threshold)
+    return t_stat, dof, threshold, pass_bool
 
 
 def raim_fde(
