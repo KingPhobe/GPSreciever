@@ -8,7 +8,6 @@ from pathlib import Path
 
 import numpy as np
 
-from gnss_twin.attacks import create_attack
 from gnss_twin.config import SimConfig
 from gnss_twin.logger import save_epochs_csv, save_epochs_npz
 from gnss_twin.models import (
@@ -21,24 +20,19 @@ from gnss_twin.models import (
     ResidualStats,
     SvState,
 )
-from gnss_twin.meas.pseudorange import LIGHT_SPEED_MPS, SyntheticMeasurementSource, geometric_range_m
-from gnss_twin.integrity.flags import IntegrityConfig, SvTracker, integrity_pvt
-from gnss_twin.integrity.raim import chi2_threshold, compute_raim
+from gnss_twin.meas.pseudorange import SyntheticMeasurementSource
 from gnss_twin.plots import save_run_plots
-from gnss_twin.receiver.gating import postfit_gate, prefit_filter
-from gnss_twin.receiver.ekf_nav import EkfNav
-from gnss_twin.receiver.tracking_state import TrackingState
-from gnss_twin.receiver.wls_pvt import wls_pvt
-from gnss_twin.sat.simple_gps import SimpleGpsConfig, SimpleGpsConstellation
+from gnss_twin.runtime import Engine
 from gnss_twin.sat.visibility import visible_sv_states
 from gnss_twin.utils.angles import elev_az_from_rx_sv
 from gnss_twin.utils.wgs84 import ecef_to_lla, lla_to_ecef
 
 
 def run_static_demo(cfg: SimConfig, run_dir: Path, save_figs: bool = True) -> Path:
-    receiver_lla = (37.4275, -122.1697, 30.0)
-    receiver_truth = lla_to_ecef(*receiver_lla)
-    receiver_clock = 4.2e-6
+    engine = Engine(cfg)
+    receiver_lla = engine.receiver_lla
+    receiver_truth = engine.receiver_truth_ecef
+    receiver_clock = engine.receiver_clock
     dummy_meas = GnssMeasurement(
         sv_id="G01",
         t=0.0,
@@ -101,19 +95,7 @@ def run_static_demo(cfg: SimConfig, run_dir: Path, save_figs: bool = True) -> Pa
     elev_deg, az_deg = elev_az_from_rx_sv(receiver_truth, sv_overhead)
     print(f"Sample elevation/azimuth (deg): ({elev_deg:.2f}, {az_deg:.2f})")
 
-    seed = cfg.seed if cfg.seed is not None else 42
-    constellation = SimpleGpsConstellation(SimpleGpsConfig(seed=seed))
-    attack_name = cfg.attack_name or "none"
-    attacks = [] if attack_name.lower() == "none" else [create_attack(attack_name, cfg.attack_params)]
-    rng = np.random.default_rng(seed)
-    measurement_source = SyntheticMeasurementSource(
-        constellation=constellation,
-        receiver_truth=dummy_truth,
-        cn0_zenith_dbhz=47.0,
-        cn0_min_dbhz=cfg.cn0_min_dbhz,
-        rng=rng,
-        attacks=attacks,
-    )
+    measurement_source: SyntheticMeasurementSource = engine.measurement_source
     first_epoch_meas = measurement_source.get_measurements(0.0)
     print("First-epoch pseudoranges (m):")
     for meas in first_epoch_meas:
@@ -121,159 +103,11 @@ def run_static_demo(cfg: SimConfig, run_dir: Path, save_figs: bool = True) -> Pa
             f"  {meas.sv_id}: {meas.pr_m:.3f} (elev {meas.elev_deg:.2f} deg, cn0 {meas.cn0_dbhz:.1f})"
         )
     for t in range(5):
-        sv_states = constellation.get_sv_states(float(t))
+        sv_states = engine.constellation.get_sv_states(float(t))
         visible = visible_sv_states(receiver_truth, sv_states, elevation_mask_deg=cfg.elev_mask_deg)
         print(f"{len(visible)} visible satellites at t={t}s")
 
-    times = np.arange(0.0, cfg.duration, cfg.dt)
-    rms_errors: list[float] = []
-    pos_errors: list[float] = []
-    pdop_series: list[float] = []
-    speed_series: list[float] = []
-    drift_series: list[float] = []
-    fix_valid_series: list[float] = []
-    fix_type_series: list[float] = []
-    last_pos = receiver_truth + 100.0
-    last_clk = receiver_clock
-    integrity_cfg = IntegrityConfig()
-    nis_probability = 0.95
-    tracker = SvTracker(integrity_cfg)
-    tracking_state = TrackingState(cfg)
-    ekf = EkfNav() if cfg.use_ekf else None
-    epochs: list[EpochLog] = []
-    for t in times:
-        sv_states = constellation.get_sv_states(float(t))
-        sv_by_id = {state.sv_id: state for state in sv_states}
-        meas = measurement_source.get_measurements(float(t))
-        filtered_meas, _ = prefit_filter(meas, cfg)
-        used_meas = filtered_meas
-        wls_solution = None
-        if len(used_meas) >= 4:
-            wls_solution = wls_pvt(
-                used_meas,
-                sv_states,
-                initial_pos_ecef_m=last_pos,
-                initial_clk_bias_s=last_clk,
-            )
-            if wls_solution is not None:
-                sigmas_by_sv = {m.sv_id: m.sigma_pr_m for m in used_meas}
-                offender = postfit_gate(
-                    wls_solution.residuals_m,
-                    sigmas_by_sv,
-                    gate=cfg.postfit_gate_sigma,
-                )
-                if offender:
-                    used_meas = [m for m in used_meas if m.sv_id != offender]
-                    if len(used_meas) >= 4:
-                        wls_solution = wls_pvt(
-                            used_meas,
-                            sv_states,
-                            initial_pos_ecef_m=last_pos,
-                            initial_clk_bias_s=last_clk,
-                        )
-        tracking_states = tracking_state.update(meas)
-        errors = []
-        for m in meas:
-            state = sv_by_id[m.sv_id]
-            geometric = geometric_range_m(receiver_truth, state.pos_ecef_m)
-            clock_term = LIGHT_SPEED_MPS * (measurement_source.receiver_clock_bias_s - state.clk_bias_s)
-            errors.append(m.pr_m - geometric - clock_term)
-        rms = float(np.sqrt(np.mean(np.square(errors)))) if errors else 0.0
-        rms_errors.append(rms)
-
-        solution, per_sv_stats = integrity_pvt(
-            used_meas,
-            sv_states,
-            initial_pos_ecef_m=last_pos,
-            initial_clk_bias_s=last_clk,
-            config=integrity_cfg,
-            tracker=tracker,
-        )
-        nis = None
-        innov_dim = None
-        if cfg.use_ekf and ekf is not None:
-            was_initialized = ekf.initialized
-            if not ekf.initialized and wls_solution is not None:
-                ekf.initialize_from_wls(wls_solution)
-            if ekf.initialized and was_initialized:
-                ekf.predict(cfg.dt)
-            if ekf.initialized:
-                ekf.update_pseudorange(
-                    used_meas,
-                    sv_states,
-                    initial_pos_ecef_m=last_pos,
-                    initial_clk_bias_s=last_clk,
-                )
-                nis = ekf.last_nis
-                innov_dim = ekf.last_innov_dim
-                ekf.update_prr(used_meas, sv_states)
-                solution = PvtSolution(
-                    pos_ecef=ekf.pos_ecef_m.copy(),
-                    vel_ecef=ekf.vel_ecef_mps.copy(),
-                    clk_bias_s=ekf.clk_bias_s,
-                    clk_drift_sps=ekf.clk_drift_sps,
-                    dop=solution.dop,
-                    residuals=solution.residuals,
-                    fix_flags=solution.fix_flags,
-                )
-        for sv_id, track_state in tracking_states.items():
-            per_sv_stats.setdefault(sv_id, {})
-            per_sv_stats[sv_id]["locked"] = 1.0 if track_state.locked else 0.0
-        sigmas_by_sv = {meas.sv_id: meas.sigma_pr_m for meas in used_meas}
-        residuals_by_sv = {
-            sv_id: float(stats["residual_m"])
-            for sv_id, stats in per_sv_stats.items()
-            if sv_id in sigmas_by_sv and np.isfinite(stats.get("residual_m", float("nan")))
-        }
-        t_stat, dof, threshold, passed = compute_raim(
-            residuals_by_sv,
-            sigmas_by_sv,
-            num_states=4,
-            alpha=integrity_cfg.chi_square_alpha,
-        )
-        per_sv_stats["_raim"] = {
-            "t_stat": t_stat,
-            "dof": float(dof),
-            "threshold": threshold,
-            "pass": 1.0 if passed else 0.0,
-        }
-        fix_type = solution.fix_flags.fix_type
-        fix_valid_series.append(1.0 if solution.fix_flags.valid else 0.0)
-        fix_type_series.append({"NO FIX": 0.0, "2D": 1.0, "3D": 2.0}.get(fix_type, 0.0))
-        if fix_type == "NO FIX" or not np.isfinite(solution.pos_ecef).all():
-            pos_errors.append(float("nan"))
-            pdop_series.append(float("nan"))
-            speed_series.append(float("nan"))
-            drift_series.append(float("nan"))
-        else:
-            pos_errors.append(float(np.linalg.norm(solution.pos_ecef - receiver_truth)))
-            pdop_series.append(solution.dop.pdop)
-            last_pos = solution.pos_ecef
-            last_clk = solution.clk_bias_s
-            if solution.vel_ecef is None:
-                speed_series.append(float("nan"))
-                drift_series.append(float("nan"))
-            else:
-                speed_series.append(float(np.linalg.norm(solution.vel_ecef)))
-                drift_series.append(solution.clk_drift_sps)
-
-        nis_alarm = False
-        if cfg.use_ekf and nis is not None and innov_dim is not None:
-            threshold = chi2_threshold(innov_dim, nis_probability)
-            nis_alarm = bool(np.isfinite(threshold) and nis > threshold)
-
-        epochs.append(
-            EpochLog(
-                t=float(t),
-                meas=meas,
-                solution=solution,
-                truth=dummy_truth,
-                nis=nis,
-                nis_alarm=nis_alarm,
-                innov_dim=innov_dim,
-                per_sv_stats=per_sv_stats,
-            )
-        )
+    epochs = engine.run(0.0, cfg.duration, cfg.dt)
 
     run_dir.mkdir(parents=True, exist_ok=True)
     if save_figs:
