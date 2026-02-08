@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
+from gnss_twin.config import SimConfig
 from gnss_twin.logger import save_epochs_csv, save_epochs_npz
 from gnss_twin.models import (
     DopMetrics,
@@ -21,6 +22,7 @@ from gnss_twin.models import (
 from gnss_twin.meas.pseudorange import LIGHT_SPEED_MPS, SyntheticMeasurementSource, geometric_range_m
 from gnss_twin.integrity.flags import IntegrityConfig, SvTracker, integrity_pvt
 from gnss_twin.plots import save_run_plots
+from gnss_twin.receiver.tracking_state import TrackingState
 from gnss_twin.sat.simple_gps import SimpleGpsConfig, SimpleGpsConstellation
 from gnss_twin.sat.visibility import visible_sv_states
 from gnss_twin.utils.angles import elev_az_from_rx_sv
@@ -82,7 +84,7 @@ def run_demo(*, duration_s: float, out_dir: str | Path, run_name: str | None = N
         meas=[dummy_meas],
         solution=dummy_solution,
         truth=dummy_truth,
-        per_sv_stats={dummy_sv.sv_id: {"residual_m": 1.0, "used": 1.0}},
+        per_sv_stats={dummy_sv.sv_id: {"residual_m": 1.0, "used": 1.0, "locked": 0.0}},
     )
     print(epoch_log)
     rx_lat, rx_lon, rx_alt = ecef_to_lla(*receiver_truth)
@@ -122,11 +124,14 @@ def run_demo(*, duration_s: float, out_dir: str | Path, run_name: str | None = N
     last_clk = receiver_clock
     integrity_cfg = IntegrityConfig()
     tracker = SvTracker(integrity_cfg)
+    sim_cfg = SimConfig()
+    tracking_state = TrackingState(sim_cfg)
     epochs: list[EpochLog] = []
     for t in times:
         sv_states = constellation.get_sv_states(float(t))
         sv_by_id = {state.sv_id: state for state in sv_states}
         meas = measurement_source.get_measurements(float(t))
+        tracking_states = tracking_state.update(meas)
         errors = []
         for m in meas:
             state = sv_by_id[m.sv_id]
@@ -144,6 +149,9 @@ def run_demo(*, duration_s: float, out_dir: str | Path, run_name: str | None = N
             config=integrity_cfg,
             tracker=tracker,
         )
+        for sv_id, track_state in tracking_states.items():
+            per_sv_stats.setdefault(sv_id, {})
+            per_sv_stats[sv_id]["locked"] = 1.0 if track_state.locked else 0.0
         fix_type = solution.fix_flags.fix_type
         fix_valid_series.append(1.0 if solution.fix_flags.valid else 0.0)
         fix_type_series.append({"NO FIX": 0.0, "2D": 1.0, "3D": 2.0}.get(fix_type, 0.0))

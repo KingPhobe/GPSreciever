@@ -13,3 +13,8 @@ class SimConfig:
     dt: float = 1.0
     duration: float = 60.0
     elev_mask_deg: float = 10.0
+    enable_tracking_placeholder: bool = True
+    cn0_lock_on_dbhz: float = 30.0
+    cn0_lock_off_dbhz: float = 25.0
+    n_good_to_lock: int = 3
+    n_bad_to_unlock: int = 2
