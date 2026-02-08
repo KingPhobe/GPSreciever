@@ -58,6 +58,9 @@ def test_dataclass_fields() -> None:
         "meas",
         "solution",
         "truth",
+        "nis",
+        "nis_alarm",
+        "innov_dim",
         "per_sv_stats",
     ]
     assert [field.name for field in fields(FixFlags)] == [

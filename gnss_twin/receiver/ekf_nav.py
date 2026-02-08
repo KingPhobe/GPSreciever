@@ -40,6 +40,8 @@ class EkfNav:
             ]
         )
         self.initialized = False
+        self.last_nis: float | None = None
+        self.last_innov_dim: int | None = None
 
     @property
     def pos_ecef_m(self) -> np.ndarray:
@@ -203,6 +205,8 @@ class EkfNav:
             s_inv = np.linalg.inv(s)
         except np.linalg.LinAlgError:
             return False
+        self.last_nis = float(residuals.T @ s_inv @ residuals)
+        self.last_innov_dim = int(residuals.shape[0])
         k = self.P @ h_matrix.T @ s_inv
         self.x = self.x + k @ residuals
         i = np.eye(self.P.shape[0])

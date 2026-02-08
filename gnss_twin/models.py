@@ -105,6 +105,9 @@ class EpochLog:
     meas: list[GnssMeasurement]
     solution: PvtSolution | None
     truth: ReceiverTruth | None
+    nis: float | None = None
+    nis_alarm: bool = False
+    innov_dim: int | None = None
     per_sv_stats: Mapping[str, Mapping[str, float]] = field(default_factory=dict)
 
 
