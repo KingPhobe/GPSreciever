@@ -11,7 +11,7 @@ from gnss_twin.config import SimConfig
 from gnss_twin.integrity.flags import IntegrityConfig, SvTracker, integrity_pvt
 from gnss_twin.integrity.raim import chi2_threshold, compute_raim
 from gnss_twin.meas.pseudorange import SyntheticMeasurementSource
-from gnss_twin.models import EpochLog, PvtSolution, ReceiverTruth
+from gnss_twin.models import EpochLog, PvtSolution, ReceiverTruth, fix_type_from_label
 from gnss_twin.receiver.ekf_nav import EkfNav
 from gnss_twin.receiver.gating import postfit_gate, prefit_filter
 from gnss_twin.receiver.tracking_state import TrackingState
@@ -52,8 +52,12 @@ class Engine:
         seed = self.cfg.seed if self.cfg.seed is not None else 42
         self.rng = np.random.default_rng(seed)
         self.constellation = SimpleGpsConstellation(SimpleGpsConfig(seed=seed))
-        attack_name = self.cfg.attack_name or "none"
-        self.attacks = [] if attack_name.lower() == "none" else [create_attack(attack_name, self.cfg.attack_params)]
+        self.attack_name = self.cfg.attack_name or "none"
+        self.attacks = (
+            []
+            if self.attack_name.lower() == "none"
+            else [create_attack(self.attack_name, self.cfg.attack_params)]
+        )
         for attack in self.attacks:
             attack.reset(seed)
         self.measurement_source = SyntheticMeasurementSource(
@@ -169,13 +173,29 @@ class Engine:
             self.last_pos = solution.pos_ecef
             self.last_clk = solution.clk_bias_s
 
+        fix_valid = solution.fix_flags.valid if solution is not None else None
+        fix_type = fix_type_from_label(solution.fix_flags.fix_type) if solution is not None else None
+        dop = solution.dop if solution is not None else None
         epoch_log = EpochLog(
             t=float(t),
             meas=meas,
             solution=solution,
             truth=self.receiver_truth,
+            t_s=float(t),
+            fix_valid=fix_valid,
+            fix_type=fix_type,
+            sats_used=solution.fix_flags.sv_count if solution is not None else None,
+            pdop=dop.pdop if dop is not None else None,
+            hdop=dop.hdop if dop is not None else None,
+            vdop=dop.vdop if dop is not None else None,
+            residual_rms_m=solution.residuals.rms_m if solution is not None else None,
+            pos_ecef=solution.pos_ecef.copy() if solution is not None else None,
+            vel_ecef=solution.vel_ecef.copy() if solution is not None and solution.vel_ecef is not None else None,
+            clk_bias_s=solution.clk_bias_s if solution is not None else None,
+            clk_drift_sps=solution.clk_drift_sps if solution is not None else None,
             nis=nis,
             nis_alarm=nis_alarm,
+            attack_name=self.attack_name,
             innov_dim=innov_dim,
             per_sv_stats=per_sv_stats,
         )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from enum import IntEnum
 from typing import Mapping
 
 import numpy as np
@@ -84,6 +85,27 @@ class FixFlags:
     chi_square_threshold: float
 
 
+class FixType(IntEnum):
+    """Numeric fix type mapping for GUI-ready telemetry."""
+
+    NO_FIX = 0
+    FIX_2D = 1
+    FIX_3D = 2
+
+
+_FIX_TYPE_LABELS = {
+    "NO FIX": FixType.NO_FIX,
+    "2D": FixType.FIX_2D,
+    "3D": FixType.FIX_3D,
+}
+
+
+def fix_type_from_label(label: str) -> FixType:
+    """Convert a solver fix-type label into a numeric enum."""
+
+    return _FIX_TYPE_LABELS.get(label.upper(), FixType.NO_FIX)
+
+
 @dataclass(frozen=True)
 class PvtSolution:
     """Position/velocity/time solution summary."""
@@ -105,8 +127,21 @@ class EpochLog:
     meas: list[GnssMeasurement]
     solution: PvtSolution | None
     truth: ReceiverTruth | None
+    t_s: float | None = None
+    fix_valid: bool | None = None
+    fix_type: FixType | int | None = None
+    sats_used: int | None = None
+    pdop: float | None = None
+    hdop: float | None = None
+    vdop: float | None = None
+    residual_rms_m: float | None = None
+    pos_ecef: np.ndarray | None = None
+    vel_ecef: np.ndarray | None = None
+    clk_bias_s: float | None = None
+    clk_drift_sps: float | None = None
     nis: float | None = None
     nis_alarm: bool = False
+    attack_name: str | None = None
     innov_dim: int | None = None
     per_sv_stats: Mapping[str, Mapping[str, float]] = field(default_factory=dict)
 

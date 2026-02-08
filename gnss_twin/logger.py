@@ -7,14 +7,36 @@ from pathlib import Path
 
 import numpy as np
 
-from gnss_twin.models import EpochLog
+from gnss_twin.models import EpochLog, FixType, fix_type_from_label
 
-_CSV_HEADER = (
-    "t,pos_x,pos_y,pos_z,vel_x,vel_y,vel_z,clk_bias_s,clk_drift_sps,"
-    "gdop,pdop,hdop,vdop,residual_rms_m,residual_mean_m,residual_max_m,chi_square,"
-    "nis,nis_alarm,innov_dim,"
-    "fix_type,valid,sats_used\n"
-)
+EPOCH_CSV_COLUMNS = [
+    "t",
+    "t_s",
+    "fix_valid",
+    "fix_type",
+    "sats_used",
+    "pdop",
+    "hdop",
+    "vdop",
+    "residual_rms_m",
+    "pos_ecef_x",
+    "pos_ecef_y",
+    "pos_ecef_z",
+    "vel_ecef_x",
+    "vel_ecef_y",
+    "vel_ecef_z",
+    "clk_bias_s",
+    "clk_drift_sps",
+    "nis",
+    "nis_alarm",
+    "attack_name",
+    "gdop",
+    "residual_mean_m",
+    "residual_max_m",
+    "chi_square",
+    "innov_dim",
+]
+_CSV_HEADER = ",".join(EPOCH_CSV_COLUMNS) + "\n"
 
 
 def append_epoch_csv(path: str | Path, epoch: EpochLog) -> None:
@@ -55,25 +77,65 @@ def load_epochs_npz(path: str | Path) -> list[dict]:
 
 def _epoch_to_csv_line(epoch: EpochLog) -> str:
     solution = epoch.solution
-    if solution is None:
-        return (
-            f"{epoch.t}," + ",".join(["" for _ in range(22)]) + "\n"
-        )
+    t_s = epoch.t_s if epoch.t_s is not None else epoch.t
+    pos = _resolve_vector(epoch.pos_ecef, solution.pos_ecef if solution is not None else None)
+    vel = _resolve_vector(epoch.vel_ecef, solution.vel_ecef if solution is not None else None)
+    dop = solution.dop if solution is not None else None
+    residuals = solution.residuals if solution is not None else None
+    flags = solution.fix_flags if solution is not None else None
+    fix_valid = epoch.fix_valid if epoch.fix_valid is not None else (flags.valid if flags else None)
+    fix_type = epoch.fix_type if epoch.fix_type is not None else (fix_type_from_label(flags.fix_type) if flags else None)
+    if isinstance(fix_type, FixType):
+        fix_type_value = int(fix_type)
+    elif fix_type is None:
+        fix_type_value = None
+    else:
+        fix_type_value = int(fix_type)
 
-    pos = solution.pos_ecef
-    vel = solution.vel_ecef if solution.vel_ecef is not None else np.array([np.nan, np.nan, np.nan])
-    dop = solution.dop
-    residuals = solution.residuals
-    flags = solution.fix_flags
-    nis = "" if epoch.nis is None else str(epoch.nis)
-    innov_dim = "" if epoch.innov_dim is None else str(epoch.innov_dim)
-    return (
-        f"{epoch.t},"
-        f"{pos[0]},{pos[1]},{pos[2]},"
-        f"{vel[0]},{vel[1]},{vel[2]},"
-        f"{solution.clk_bias_s},{solution.clk_drift_sps},"
-        f"{dop.gdop},{dop.pdop},{dop.hdop},{dop.vdop},"
-        f"{residuals.rms_m},{residuals.mean_m},{residuals.max_m},{residuals.chi_square},"
-        f"{nis},{int(epoch.nis_alarm)},{innov_dim},"
-        f"{flags.fix_type},{int(flags.valid)},{flags.sv_count}\n"
-    )
+    row = [
+        epoch.t,
+        t_s,
+        _format_value(fix_valid),
+        _format_value(fix_type_value),
+        _format_value(epoch.sats_used if epoch.sats_used is not None else (flags.sv_count if flags else None)),
+        _format_value(epoch.pdop if epoch.pdop is not None else (dop.pdop if dop else None)),
+        _format_value(epoch.hdop if epoch.hdop is not None else (dop.hdop if dop else None)),
+        _format_value(epoch.vdop if epoch.vdop is not None else (dop.vdop if dop else None)),
+        _format_value(
+            epoch.residual_rms_m if epoch.residual_rms_m is not None else (residuals.rms_m if residuals else None)
+        ),
+        _format_value(pos[0]),
+        _format_value(pos[1]),
+        _format_value(pos[2]),
+        _format_value(vel[0]),
+        _format_value(vel[1]),
+        _format_value(vel[2]),
+        _format_value(epoch.clk_bias_s if epoch.clk_bias_s is not None else (solution.clk_bias_s if solution else None)),
+        _format_value(
+            epoch.clk_drift_sps if epoch.clk_drift_sps is not None else (solution.clk_drift_sps if solution else None)
+        ),
+        _format_value(epoch.nis),
+        _format_value(int(epoch.nis_alarm)),
+        epoch.attack_name or "",
+        _format_value(dop.gdop if dop else None),
+        _format_value(residuals.mean_m if residuals else None),
+        _format_value(residuals.max_m if residuals else None),
+        _format_value(residuals.chi_square if residuals else None),
+        _format_value(epoch.innov_dim),
+    ]
+    return ",".join(str(value) for value in row) + "\n"
+
+
+def _resolve_vector(primary: np.ndarray | None, fallback: np.ndarray | None) -> np.ndarray:
+    vector = primary if primary is not None else fallback
+    if vector is None:
+        return np.array([np.nan, np.nan, np.nan], dtype=float)
+    return np.array(vector, dtype=float)
+
+
+def _format_value(value: float | int | bool | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    return str(value)

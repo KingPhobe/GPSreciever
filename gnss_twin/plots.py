@@ -7,6 +7,7 @@ from pathlib import Path
 
 import matplotlib
 import numpy as np
+import pandas as pd
 
 from gnss_twin.models import EpochLog
 
@@ -22,23 +23,123 @@ def save_run_plots(
 ) -> Path:
     """Save standard run plots to an output directory."""
 
-    output_dir = _prepare_output_dir(out_dir, run_name)
-    times = np.array([epoch.t for epoch in epochs], dtype=float)
-    pos_error = np.array([_position_error(epoch) for epoch in epochs], dtype=float)
-    clk_bias = np.array([_clock_bias(epoch) for epoch in epochs], dtype=float)
-    residual_rms = np.array([_residual_rms(epoch) for epoch in epochs], dtype=float)
-    dop = np.array([_dop_vector(epoch) for epoch in epochs], dtype=float)
-    sv_used = np.array([_sv_used(epoch) for epoch in epochs], dtype=float)
-    fix_type = np.array([_fix_type_value(epoch) for epoch in epochs], dtype=float)
-    fix_valid = np.array([_fix_valid_value(epoch) for epoch in epochs], dtype=float)
+    frame = epochs_to_frame(epochs)
+    return plot_update(frame, out_dir=out_dir, run_name=run_name)
 
-    _plot_position_error(times, pos_error, output_dir / "position_error.png")
-    _plot_clock_bias(times, clk_bias, output_dir / "clock_bias.png")
-    _plot_residual_rms(times, residual_rms, output_dir / "residual_rms.png")
-    _plot_dop(times, dop, output_dir / "dop.png")
-    _plot_sv_used(times, sv_used, output_dir / "satellites_used.png")
-    _plot_fix_status(times, fix_type, fix_valid, output_dir / "fix_status.png")
+
+def plot_update(
+    data: pd.DataFrame,
+    *,
+    out_dir: str | Path = "out",
+    run_name: str | None = None,
+) -> Path:
+    """Save standard run plots using a GUI-friendly DataFrame input."""
+
+    output_dir = _prepare_output_dir(out_dir, run_name)
+    plot_position_error(data, output_dir / "position_error.png")
+    plot_clock_bias(data, output_dir / "clock_bias.png")
+    plot_residual_rms(data, output_dir / "residual_rms.png")
+    plot_dop(data, output_dir / "dop.png")
+    plot_sv_used(data, output_dir / "satellites_used.png")
+    plot_fix_status(data, output_dir / "fix_status.png")
     return output_dir
+
+
+def plot_position_error(data: pd.DataFrame, path: str | Path) -> None:
+    times = _series_or_nan(data, "t_s")
+    if "pos_error_m" in data.columns:
+        errors = data["pos_error_m"].to_numpy(dtype=float)
+    else:
+        errors = np.full(len(times), float("nan"))
+    _plot_position_error(times, errors, Path(path))
+
+
+def plot_clock_bias(data: pd.DataFrame, path: str | Path) -> None:
+    times = _series_or_nan(data, "t_s")
+    clk_bias = _series_or_nan(data, "clk_bias_s")
+    _plot_clock_bias(times, clk_bias, Path(path))
+
+
+def plot_residual_rms(data: pd.DataFrame, path: str | Path) -> None:
+    times = _series_or_nan(data, "t_s")
+    residual_rms = _series_or_nan(data, "residual_rms_m")
+    _plot_residual_rms(times, residual_rms, Path(path))
+
+
+def plot_dop(data: pd.DataFrame, path: str | Path) -> None:
+    times = _series_or_nan(data, "t_s")
+    dop = np.vstack(
+        [
+            _series_or_nan(data, "gdop"),
+            _series_or_nan(data, "pdop"),
+            _series_or_nan(data, "hdop"),
+            _series_or_nan(data, "vdop"),
+        ]
+    ).T
+    _plot_dop(times, dop, Path(path))
+
+
+def plot_sv_used(data: pd.DataFrame, path: str | Path) -> None:
+    times = _series_or_nan(data, "t_s")
+    sv_used = _series_or_nan(data, "sats_used")
+    _plot_sv_used(times, sv_used, Path(path))
+
+
+def plot_fix_status(data: pd.DataFrame, path: str | Path) -> None:
+    times = _series_or_nan(data, "t_s")
+    fix_type = _series_or_nan(data, "fix_type")
+    fix_valid = _series_or_nan(data, "fix_valid")
+    _plot_fix_status(times, fix_type, fix_valid, Path(path))
+
+
+def epochs_to_frame(epochs: list[EpochLog]) -> pd.DataFrame:
+    """Build a DataFrame from EpochLog entries for GUI plotting."""
+
+    payload = []
+    for epoch in epochs:
+        solution = epoch.solution
+        pos_error = _position_error(epoch)
+        dop = _dop_vector(epoch)
+        payload.append(
+            {
+                "t_s": epoch.t_s if epoch.t_s is not None else epoch.t,
+                "pos_error_m": pos_error,
+                "clk_bias_s": _clock_bias(epoch),
+                "residual_rms_m": _residual_rms(epoch),
+                "gdop": dop[0],
+                "pdop": dop[1],
+                "hdop": dop[2],
+                "vdop": dop[3],
+                "sats_used": _sv_used(epoch),
+                "fix_type": _fix_type_value(epoch),
+                "fix_valid": _fix_valid_value(epoch),
+                "pos_ecef_x": solution.pos_ecef[0] if solution is not None else float("nan"),
+                "pos_ecef_y": solution.pos_ecef[1] if solution is not None else float("nan"),
+                "pos_ecef_z": solution.pos_ecef[2] if solution is not None else float("nan"),
+                "vel_ecef_x": (
+                    solution.vel_ecef[0]
+                    if solution is not None and solution.vel_ecef is not None
+                    else float("nan")
+                ),
+                "vel_ecef_y": (
+                    solution.vel_ecef[1]
+                    if solution is not None and solution.vel_ecef is not None
+                    else float("nan")
+                ),
+                "vel_ecef_z": (
+                    solution.vel_ecef[2]
+                    if solution is not None and solution.vel_ecef is not None
+                    else float("nan")
+                ),
+            }
+        )
+    return pd.DataFrame(payload)
+
+
+def _series_or_nan(data: pd.DataFrame, column: str) -> np.ndarray:
+    if column in data.columns:
+        return data[column].to_numpy(dtype=float)
+    return np.full(len(data), float("nan"))
 
 
 def _prepare_output_dir(out_dir: str | Path, run_name: str | None) -> Path:
