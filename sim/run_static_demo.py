@@ -23,6 +23,7 @@ from gnss_twin.meas.pseudorange import LIGHT_SPEED_MPS, SyntheticMeasurementSour
 from gnss_twin.integrity.flags import IntegrityConfig, SvTracker, integrity_pvt
 from gnss_twin.plots import save_run_plots
 from gnss_twin.receiver.gating import postfit_gate, prefit_filter
+from gnss_twin.receiver.ekf_nav import EkfNav
 from gnss_twin.receiver.tracking_state import TrackingState
 from gnss_twin.receiver.wls_pvt import wls_pvt
 from gnss_twin.sat.simple_gps import SimpleGpsConfig, SimpleGpsConstellation
@@ -31,7 +32,13 @@ from gnss_twin.utils.angles import elev_az_from_rx_sv
 from gnss_twin.utils.wgs84 import ecef_to_lla, lla_to_ecef
 
 
-def run_demo(*, duration_s: float, out_dir: str | Path, run_name: str | None = None) -> Path:
+def run_demo(
+    *,
+    duration_s: float,
+    out_dir: str | Path,
+    run_name: str | None = None,
+    use_ekf: bool = False,
+) -> Path:
     receiver_lla = (37.4275, -122.1697, 30.0)
     receiver_truth = lla_to_ecef(*receiver_lla)
     receiver_clock = 4.2e-6
@@ -126,8 +133,9 @@ def run_demo(*, duration_s: float, out_dir: str | Path, run_name: str | None = N
     last_clk = receiver_clock
     integrity_cfg = IntegrityConfig()
     tracker = SvTracker(integrity_cfg)
-    sim_cfg = SimConfig()
+    sim_cfg = SimConfig(use_ekf=use_ekf)
     tracking_state = TrackingState(sim_cfg)
+    ekf = EkfNav() if sim_cfg.use_ekf else None
     epochs: list[EpochLog] = []
     for t in times:
         sv_states = constellation.get_sv_states(float(t))
@@ -135,6 +143,7 @@ def run_demo(*, duration_s: float, out_dir: str | Path, run_name: str | None = N
         meas = measurement_source.get_measurements(float(t))
         filtered_meas, _ = prefit_filter(meas, sim_cfg)
         used_meas = filtered_meas
+        wls_solution = None
         if len(used_meas) >= 4:
             wls_solution = wls_pvt(
                 used_meas,
@@ -152,7 +161,7 @@ def run_demo(*, duration_s: float, out_dir: str | Path, run_name: str | None = N
                 if offender:
                     used_meas = [m for m in used_meas if m.sv_id != offender]
                     if len(used_meas) >= 4:
-                        wls_pvt(
+                        wls_solution = wls_pvt(
                             used_meas,
                             sv_states,
                             initial_pos_ecef_m=last_pos,
@@ -176,6 +185,29 @@ def run_demo(*, duration_s: float, out_dir: str | Path, run_name: str | None = N
             config=integrity_cfg,
             tracker=tracker,
         )
+        if sim_cfg.use_ekf and ekf is not None:
+            was_initialized = ekf.initialized
+            if not ekf.initialized and wls_solution is not None:
+                ekf.initialize_from_wls(wls_solution)
+            if ekf.initialized and was_initialized:
+                ekf.predict(sim_cfg.dt)
+            if ekf.initialized:
+                ekf.update_pseudorange(
+                    used_meas,
+                    sv_states,
+                    initial_pos_ecef_m=last_pos,
+                    initial_clk_bias_s=last_clk,
+                )
+                ekf.update_prr(used_meas, sv_states)
+                solution = PvtSolution(
+                    pos_ecef=ekf.pos_ecef_m.copy(),
+                    vel_ecef=ekf.vel_ecef_mps.copy(),
+                    clk_bias_s=ekf.clk_bias_s,
+                    clk_drift_sps=ekf.clk_drift_sps,
+                    dop=solution.dop,
+                    residuals=solution.residuals,
+                    fix_flags=solution.fix_flags,
+                )
         for sv_id, track_state in tracking_states.items():
             per_sv_stats.setdefault(sv_id, {})
             per_sv_stats[sv_id]["locked"] = 1.0 if track_state.locked else 0.0
@@ -220,8 +252,14 @@ def main() -> None:
     parser.add_argument("--duration-s", type=float, default=60.0, help="Duration in seconds.")
     parser.add_argument("--out-dir", type=str, default="out", help="Output directory root.")
     parser.add_argument("--run-name", type=str, default=None, help="Run name for outputs.")
+    parser.add_argument("--use-ekf", action="store_true", help="Enable EKF navigation filter.")
     args = parser.parse_args()
-    output_dir = run_demo(duration_s=args.duration_s, out_dir=args.out_dir, run_name=args.run_name)
+    output_dir = run_demo(
+        duration_s=args.duration_s,
+        out_dir=args.out_dir,
+        run_name=args.run_name,
+        use_ekf=args.use_ekf,
+    )
     print(f"Saved outputs to {output_dir}")
 
 
