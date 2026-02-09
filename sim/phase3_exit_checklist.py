@@ -15,6 +15,10 @@ from gnss_twin.logger import EPOCH_CSV_COLUMNS
 from sim.run_static_demo import run_static_demo
 
 
+WARMUP_S = 10.0
+NIS_THRESHOLD_P = 0.95
+
+
 @dataclass(frozen=True)
 class ScenarioResult:
     name: str
@@ -115,16 +119,34 @@ def _check_determinism(baseline: ScenarioResult, repeat: ScenarioResult) -> bool
 
 def _check_baseline_health(baseline: ScenarioResult) -> bool:
     metrics = _summary_metrics(baseline.rows)
-    return metrics["nis_alarm_rate"] < 0.05 and metrics["fix_valid_rate"] > 0.9
+    baseline_nis_alarm_rate = metrics["nis_alarm_rate"]
+    nis_samples = int(metrics["nis_alarm_samples"])
+    assert baseline_nis_alarm_rate < 0.030, (
+        "Baseline NIS alarm rate too high: "
+        f"baseline_nis_alarm_rate={baseline_nis_alarm_rate:.4f}, "
+        f"nis_threshold_p={NIS_THRESHOLD_P}, "
+        f"WARMUP_S={WARMUP_S}, "
+        f"samples={nis_samples}"
+    )
+    return metrics["fix_valid_rate"] > 0.9
 
 
 def _check_spoof_separation(baseline: ScenarioResult, spoof: ScenarioResult) -> bool:
-    baseline_metrics = _summary_metrics(baseline.rows, start_t=10.0)
-    spoof_metrics = _summary_metrics(spoof.rows, start_t=10.0)
+    attack_start_t = 10.0
+    after_start_t = max(attack_start_t + 2.0, WARMUP_S)
+    baseline_metrics = _summary_metrics(baseline.rows, start_t=after_start_t)
+    spoof_metrics = _summary_metrics(spoof.rows, start_t=after_start_t)
     attack_active_rate = spoof_metrics["attack_active_rate_after_start"]
     nis_alarm_rate_after_start = spoof_metrics["nis_alarm_rate_after_start"]
     baseline_nis_after_start = baseline_metrics["nis_alarm_rate_after_start"]
-    return attack_active_rate > 0.5 and nis_alarm_rate_after_start > baseline_nis_after_start + 0.10
+    assert nis_alarm_rate_after_start >= baseline_nis_after_start + 0.10, (
+        "Spoof NIS separation too small: "
+        f"spoof_nis_alarm_rate_after_start={nis_alarm_rate_after_start:.4f}, "
+        f"baseline_nis_alarm_rate_after_start={baseline_nis_after_start:.4f}, "
+        f"WARMUP_S={WARMUP_S}, "
+        f"start_t={after_start_t}"
+    )
+    return attack_active_rate > 0.5
 
 
 def _check_jam_separation(baseline: ScenarioResult, jam: ScenarioResult) -> bool:
@@ -135,26 +157,37 @@ def _check_jam_separation(baseline: ScenarioResult, jam: ScenarioResult) -> bool
     return sats_drop or fix_drop
 
 
-def _summary_metrics(rows: list[dict[str, str]], *, start_t: float | None = None) -> dict[str, float]:
+def _summary_metrics(
+    rows: list[dict[str, str]], *, start_t: float | None = None, warmup_s: float = WARMUP_S
+) -> dict[str, float]:
     t_vals = _float_column(rows, "t")
     fix_valid = _float_column(rows, "fix_valid")
-    nis_alarm = _float_column(rows, "nis_alarm")
     sats_used = _float_column(rows, "sats_used")
     attack_active = _float_column(rows, "attack_active")
+    nis_alarm_rate, nis_alarm_samples = _nis_alarm_rate(rows, warmup_s=warmup_s)
 
     metrics = {
-        "nis_alarm_rate": _safe_mean(nis_alarm),
+        "nis_alarm_rate": nis_alarm_rate,
+        "nis_alarm_samples": float(nis_alarm_samples),
         "fix_valid_rate": _safe_mean(fix_valid),
         "sats_used_min": _safe_min(sats_used),
         "attack_active_rate": _safe_mean(attack_active),
     }
 
     if start_t is not None:
-        mask = t_vals >= start_t
-        metrics["nis_alarm_rate_after_start"] = _safe_mean(nis_alarm[mask])
+        effective_start_t = max(start_t, warmup_s)
+        mask = t_vals >= effective_start_t
+        nis_alarm_after_start, nis_samples_after_start = _nis_alarm_rate(
+            rows,
+            start_t=effective_start_t,
+            warmup_s=warmup_s,
+        )
+        metrics["nis_alarm_rate_after_start"] = nis_alarm_after_start
+        metrics["nis_alarm_samples_after_start"] = float(nis_samples_after_start)
         metrics["attack_active_rate_after_start"] = _safe_mean(attack_active[mask])
     else:
         metrics["nis_alarm_rate_after_start"] = float("nan")
+        metrics["nis_alarm_samples_after_start"] = 0.0
         metrics["attack_active_rate_after_start"] = float("nan")
 
     return metrics
@@ -178,6 +211,34 @@ def _parse_float(value: str | None) -> float | None:
         return float(value)
     except ValueError:
         return None
+
+
+def _nis_alarm_rate(
+    rows: list[dict[str, str]],
+    *,
+    start_t: float | None = None,
+    warmup_s: float = WARMUP_S,
+) -> tuple[float, int]:
+    min_t = warmup_s if start_t is None else max(start_t, warmup_s)
+    samples: list[float] = []
+    for row in rows:
+        t_s = _parse_float(row.get("t_s"))
+        if t_s is None or not np.isfinite(t_s) or t_s < min_t:
+            continue
+        nis_value = _parse_float(row.get("nis"))
+        if nis_value is None or not np.isfinite(nis_value):
+            continue
+        innov_dim = _parse_float(row.get("innov_dim"))
+        if innov_dim is None or not np.isfinite(innov_dim) or innov_dim <= 0.0:
+            continue
+        nis_alarm_value = _parse_float(row.get("nis_alarm"))
+        if nis_alarm_value is None or not np.isfinite(nis_alarm_value):
+            continue
+        samples.append(float(nis_alarm_value))
+    if not samples:
+        return float("nan"), 0
+    values = np.array(samples, dtype=float)
+    return float(np.mean(values)), int(values.size)
 
 
 def _safe_mean(values: np.ndarray) -> float:
