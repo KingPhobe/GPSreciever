@@ -43,7 +43,7 @@ def test_tracking_unlocks_after_bad_epochs() -> None:
 
 def test_tracking_deterministic_with_seed() -> None:
     def run_sequence(seed: int) -> list[bool]:
-        config = SimConfig(seed=seed)
+        config = SimConfig(rng_seed=seed)
         rng = np.random.default_rng(seed)
         tracker = TrackingState(config)
         locked_states: list[bool] = []

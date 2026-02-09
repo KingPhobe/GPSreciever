@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 class SimConfig:
     """Simulation configuration defaults."""
 
-    seed: int | None = None
+    rng_seed: int = 42
     dt: float = 1.0
     duration: float = 60.0
     elev_mask_deg: float = 10.0

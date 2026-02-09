@@ -126,6 +126,7 @@ def main() -> None:
     parser.add_argument("--out-dir", type=str, default="out", help="Output directory root.")
     parser.add_argument("--run-name", type=str, default=None, help="Run name for outputs.")
     parser.add_argument("--use-ekf", action="store_true", help="Enable EKF navigation filter.")
+    parser.add_argument("--rng-seed", type=int, default=None, help="Random seed for simulation.")
     parser.add_argument(
         "--attack-name",
         type=str,
@@ -150,15 +151,12 @@ def main() -> None:
         use_ekf=args.use_ekf,
         attack_name=args.attack_name,
         attack_params=attack_params,
+        rng_seed=args.rng_seed if args.rng_seed is not None else 42,
     )
     run_name = args.run_name or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     run_dir = Path(args.out_dir) / run_name
     epoch_log_path = run_static_demo(cfg, run_dir, save_figs=not args.no_plots)
     print(f"Saved outputs to {epoch_log_path.parent}")
-
-
-if __name__ == "__main__":
-    main()
 
 
 def _parse_attack_params(raw_params: list[str], attack_name: str) -> dict[str, float | str]:
@@ -182,3 +180,7 @@ def _coerce_param_value(value: str) -> float | str:
         return float(value)
     except ValueError:
         return value
+
+
+if __name__ == "__main__":
+    main()

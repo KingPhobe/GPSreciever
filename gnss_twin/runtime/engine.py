@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import random
 
 import numpy as np
 
@@ -49,7 +50,9 @@ class Engine:
         self.reset()
 
     def reset(self) -> None:
-        seed = self.cfg.seed if self.cfg.seed is not None else 42
+        seed = int(self.cfg.rng_seed)
+        np.random.seed(seed)
+        random.seed(seed)
         self.rng = np.random.default_rng(seed)
         self.constellation = SimpleGpsConstellation(SimpleGpsConfig(seed=seed))
         self.attack_name = self.cfg.attack_name or "none"

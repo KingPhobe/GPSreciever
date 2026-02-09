@@ -30,11 +30,11 @@ def main() -> None:
     run_root = Path("runs") / "phase3_exit"
     run_root.mkdir(parents=True, exist_ok=True)
 
-    baseline_cfg = SimConfig(duration=30.0, dt=1.0, seed=123, use_ekf=True)
+    baseline_cfg = SimConfig(duration=30.0, dt=1.0, rng_seed=123, use_ekf=True)
     spoof_cfg = SimConfig(
         duration=30.0,
         dt=1.0,
-        seed=123,
+        rng_seed=123,
         use_ekf=True,
         attack_name="spoof_clock_ramp",
         attack_params={"start_t": 10.0, "ramp_rate_mps": 50.0},
@@ -42,7 +42,7 @@ def main() -> None:
     jam_cfg = SimConfig(
         duration=30.0,
         dt=1.0,
-        seed=123,
+        rng_seed=123,
         use_ekf=True,
         attack_name="jam_cn0_drop",
         attack_params={"start_t": 10.0, "cn0_drop_db": 20.0, "sigma_pr_scale": 8.0},
