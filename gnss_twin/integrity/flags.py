@@ -142,7 +142,12 @@ def integrity_pvt(
     )
     chi_square_ok = raim_passed
     dop = solution.dop
-    dop_ok = dop.pdop <= cfg.pdop_max and dop.gdop <= cfg.gdop_max
+    dop_ok = (
+        np.isfinite(dop.pdop)
+        and np.isfinite(dop.gdop)
+        and dop.pdop <= cfg.pdop_max
+        and dop.gdop <= cfg.gdop_max
+    )
     valid = mask_ok and dop_ok and chi_square_ok
     fix_type = _fix_type(len(used), dop, cfg)
 
@@ -197,7 +202,7 @@ def _solution_from_wls(
 
 def _no_fix_solution(sv_in_view: int, mask_ok: bool) -> PvtSolution:
     nan_vec = np.full(3, np.nan)
-    dop = DopMetrics(gdop=float("inf"), pdop=float("inf"), hdop=float("inf"), vdop=float("inf"))
+    dop = DopMetrics(gdop=float("nan"), pdop=float("nan"), hdop=float("nan"), vdop=float("nan"))
     residuals = ResidualStats(rms_m=float("nan"), mean_m=float("nan"), max_m=float("nan"), chi_square=float("nan"))
     fix_flags = FixFlags(
         fix_type="NO FIX",
@@ -207,8 +212,8 @@ def _no_fix_solution(sv_in_view: int, mask_ok: bool) -> PvtSolution:
         sv_count=0,
         sv_in_view=sv_in_view,
         mask_ok=mask_ok,
-        pdop=float("inf"),
-        gdop=float("inf"),
+        pdop=float("nan"),
+        gdop=float("nan"),
         chi_square=float("nan"),
         chi_square_threshold=float("inf"),
     )

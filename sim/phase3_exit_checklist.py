@@ -172,6 +172,7 @@ def _summary_metrics(
         "fix_valid_rate": _safe_mean(fix_valid),
         "sats_used_min": _safe_min(sats_used),
         "attack_active_rate": _safe_mean(attack_active),
+        "pdop_max": _safe_max(_finite_column(rows, "pdop")),
     }
 
     if start_t is not None:
@@ -194,6 +195,17 @@ def _summary_metrics(
 
 
 def _float_column(rows: list[dict[str, str]], key: str) -> np.ndarray:
+    values = []
+    for row in rows:
+        value = _parse_float(row.get(key))
+        if value is not None and np.isfinite(value):
+            values.append(value)
+    if not values:
+        return np.array([], dtype=float)
+    return np.array(values, dtype=float)
+
+
+def _finite_column(rows: list[dict[str, str]], key: str) -> np.ndarray:
     values = []
     for row in rows:
         value = _parse_float(row.get(key))
@@ -251,6 +263,12 @@ def _safe_min(values: np.ndarray) -> float:
     if values.size == 0:
         return float("nan")
     return float(np.min(values))
+
+
+def _safe_max(values: np.ndarray) -> float:
+    if values.size == 0:
+        return float("nan")
+    return float(np.max(values))
 
 
 def _print_results(checks: Iterable[tuple[str, bool]]) -> None:

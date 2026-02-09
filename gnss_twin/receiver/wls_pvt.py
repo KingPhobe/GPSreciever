@@ -28,7 +28,10 @@ def _compute_dop_from_geometry(geometry: np.ndarray) -> DopMetrics:
     try:
         q = np.linalg.inv(normal)
     except np.linalg.LinAlgError:
-        return DopMetrics(gdop=float("inf"), pdop=float("inf"), hdop=float("inf"), vdop=float("inf"))
+        return DopMetrics(gdop=float("nan"), pdop=float("nan"), hdop=float("nan"), vdop=float("nan"))
+    diag = np.diag(q)
+    if not np.all(np.isfinite(diag)) or np.any(diag < 0.0):
+        return DopMetrics(gdop=float("nan"), pdop=float("nan"), hdop=float("nan"), vdop=float("nan"))
     gdop = float(np.sqrt(np.trace(q)))
     pdop = float(np.sqrt(np.sum(np.diag(q)[:3])))
     hdop = float(np.sqrt(np.sum(np.diag(q)[:2])))
