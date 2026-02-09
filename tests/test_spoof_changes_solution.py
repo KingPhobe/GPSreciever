@@ -17,11 +17,11 @@ def _run_engine(cfg: SimConfig) -> list[float]:
 
 
 def test_spoof_run_changes_solution_clock_bias() -> None:
-    baseline_cfg = SimConfig(duration=10.0, dt=1.0, seed=123)
+    baseline_cfg = SimConfig(duration=10.0, dt=1.0, rng_seed=123)
     spoof_cfg = SimConfig(
         duration=10.0,
         dt=1.0,
-        seed=123,
+        rng_seed=123,
         attack_name="spoof_clock_ramp",
         attack_params={"start_t": 0.0, "ramp_rate_mps": 50.0},
     )

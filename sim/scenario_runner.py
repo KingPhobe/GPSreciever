@@ -62,7 +62,7 @@ def _build_sim_config(scenario: dict[str, Any]) -> SimConfig:
     fields_by_name = {field.name for field in fields(SimConfig)}
     cfg_kwargs: dict[str, Any] = {
         "duration": float(scenario["duration_s"]),
-        "seed": int(scenario["rng_seed"]),
+        "rng_seed": int(scenario["rng_seed"]),
         "use_ekf": bool(scenario["use_ekf"]),
         "attack_name": str(scenario["attack_name"]),
         "attack_params": dict(scenario["attack_params"] or {}),
