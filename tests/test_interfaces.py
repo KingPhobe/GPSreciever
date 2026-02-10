@@ -77,6 +77,13 @@ def test_dataclass_fields() -> None:
         "attack_pr_bias_mean_m",
         "attack_prr_bias_mean_mps",
         "innov_dim",
+        "conops_status",
+        "conops_mode5",
+        "conops_reason_codes",
+        "integrity_p_value",
+        "integrity_residual_rms",
+        "integrity_num_sats_used",
+        "integrity_excluded_sv_ids_count",
         "per_sv_stats",
     ]
     assert [field.name for field in fields(FixFlags)] == [
