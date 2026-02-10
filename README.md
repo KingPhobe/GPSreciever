@@ -30,6 +30,20 @@ Run scenarios from JSON configs:
 python sim/scenario_runner.py --scenarios sim/scenarios/phase1_baseline.json
 ```
 
+## Live demo / playback
+
+Run the live runner baseline:
+
+```bash
+python -m sim.live_runner --duration-s 60 --use-ekf --attack-name none
+```
+
+Run a spoofed pseudorange ramp example:
+
+```bash
+python -m sim.live_runner --duration-s 60 --use-ekf --attack-name spoof_pr_ramp --attack-param target_sv=G12 --attack-param start_t=10 --attack-param slope_mps=2
+```
+
 ## Outputs
 
 Each run writes `epoch_logs.csv`/`epoch_logs.npz` plus standard plots (position error, clock bias, residual RMS, DOP, satellites
