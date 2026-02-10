@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import random
+from typing import Any, Callable, Protocol
 
 import numpy as np
 
-from gnss_twin.attacks import create_attack
+from scipy.stats import chi2
+
+from gnss_twin.attacks import AttackPipeline, create_attack
 from gnss_twin.config import SimConfig
 from gnss_twin.integrity.flags import IntegrityConfig, SvTracker, integrity_pvt
+from gnss_twin.integrity.report import IntegrityReport
 from gnss_twin.integrity.raim import chi2_threshold, compute_raim
 from gnss_twin.meas.pseudorange import SyntheticMeasurementSource
 from gnss_twin.models import EpochLog, PvtSolution, ReceiverTruth, fix_type_from_label
@@ -17,8 +21,30 @@ from gnss_twin.receiver.ekf_nav import EkfNav
 from gnss_twin.receiver.gating import postfit_gate, prefit_filter
 from gnss_twin.receiver.tracking_state import TrackingState
 from gnss_twin.receiver.wls_pvt import wls_pvt
+from gnss_twin.runtime.state_machine import ConopsStateMachine
 from gnss_twin.sat.simple_gps import SimpleGpsConfig, SimpleGpsConstellation
 from gnss_twin.utils.wgs84 import lla_to_ecef
+
+
+class _IntegrityChecker(Protocol):
+    def gate(self, measurements: list[Any]) -> list[Any]: ...
+
+    def check(
+        self,
+        measurements: list[Any],
+        sv_states: list[Any],
+        sol: Any,
+    ) -> IntegrityReport: ...
+
+
+class _Solver(Protocol):
+    def solve(
+        self,
+        measurements: list[Any],
+        sv_states: list[Any],
+        *,
+        t_s: float | None = None,
+    ) -> PvtSolution | None: ...
 
 
 @dataclass
@@ -29,6 +55,226 @@ class StepDiagnostics:
     nis: float | None
     flags: object
     epoch_log: EpochLog
+
+
+class RaimIntegrityChecker:
+    """Integrity checker that runs prefit gating and RAIM-style validation."""
+
+    def __init__(
+        self,
+        sim_cfg: SimConfig | None = None,
+        integrity_cfg: IntegrityConfig | None = None,
+    ) -> None:
+        self.sim_cfg = sim_cfg or SimConfig()
+        self.integrity_cfg = integrity_cfg or IntegrityConfig()
+        self.tracker = SvTracker(self.integrity_cfg)
+        self.last_solution: PvtSolution | None = None
+        self.last_per_sv_stats: dict[str, dict[str, float]] = {}
+
+    def gate(self, measurements: list[Any]) -> list[Any]:
+        kept, _ = prefit_filter(list(measurements), self.sim_cfg)
+        return kept
+
+    def check(
+        self,
+        measurements: list[Any],
+        sv_states: list[Any],
+        sol: PvtSolution | None,
+    ) -> IntegrityReport:
+        initial_pos = sol.pos_ecef if sol is not None else None
+        initial_clk = sol.clk_bias_s if sol is not None else 0.0
+        integrity_solution, per_sv_stats = integrity_pvt(
+            list(measurements),
+            list(sv_states),
+            initial_pos_ecef_m=initial_pos,
+            initial_clk_bias_s=initial_clk,
+            config=self.integrity_cfg,
+            tracker=self.tracker,
+        )
+        self.last_solution = integrity_solution
+        self.last_per_sv_stats = {key: dict(value) for key, value in per_sv_stats.items()}
+        residuals_by_sv = {
+            sv_id: float(stats["residual_m"])
+            for sv_id, stats in per_sv_stats.items()
+            if np.isfinite(stats.get("residual_m", float("nan")))
+        }
+        sigmas_by_sv = {
+            meas.sv_id: float(meas.sigma_pr_m)
+            for meas in measurements
+            if hasattr(meas, "sv_id")
+        }
+        t_stat, dof, threshold, passed = compute_raim(
+            residuals_by_sv,
+            sigmas_by_sv,
+            num_states=4,
+            alpha=self.integrity_cfg.chi_square_alpha,
+        )
+        p_value = None
+        if dof > 0 and np.isfinite(t_stat):
+            p_value = float(1.0 - chi2.cdf(t_stat, dof))
+        excluded_sv_ids = [_parse_sv_id(sv_id) for sv_id in integrity_solution.fix_flags.sv_rejected]
+        excluded_sv_ids = [sv_id for sv_id in excluded_sv_ids if sv_id is not None]
+        is_invalid = integrity_solution.fix_flags.fix_type == "NO FIX"
+        reason_codes = []
+        if not passed:
+            reason_codes.append("raim_fail")
+        if is_invalid:
+            reason_codes.append("insufficient_sats")
+        return IntegrityReport(
+            chi2=t_stat if np.isfinite(t_stat) else None,
+            p_value=p_value,
+            residual_rms=integrity_solution.residuals.rms_m,
+            num_sats_used=integrity_solution.fix_flags.sv_count,
+            num_rejected=len(integrity_solution.fix_flags.sv_rejected),
+            excluded_sv_ids=excluded_sv_ids,
+            is_suspect=not passed,
+            is_invalid=is_invalid,
+            reason_codes=reason_codes or ["integrity_ok"],
+        )
+
+
+class SimulationEngine:
+    """Composable engine for measurement-to-CONOPS runtime steps."""
+
+    def __init__(
+        self,
+        meas_src: Any,
+        solver: _Solver | Callable[..., PvtSolution | None],
+        integrity_checker: _IntegrityChecker | Callable[..., IntegrityReport] | None,
+        attack_pipeline: AttackPipeline | None,
+        conops_sm: ConopsStateMachine | None,
+        logger: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
+        self.meas_src = meas_src
+        self.solver = solver
+        self.integrity_checker = integrity_checker
+        self.attack_pipeline = attack_pipeline
+        self.conops_sm = conops_sm
+        self.logger = logger
+        self._default_gate_cfg = SimConfig()
+        self._last_t_s: float | None = None
+
+    def step(self, t_s: float) -> dict[str, Any]:
+        meas_raw = list(self.meas_src.get_measurements(float(t_s)))
+        sv_states = self._get_sv_states(float(t_s))
+        meas_attacked, attack_report = self._apply_attacks(meas_raw, sv_states)
+        gated_meas = self._gate_measurements(meas_attacked)
+        sol = self._solve(gated_meas, sv_states, t_s=float(t_s))
+        integrity = self._check_integrity(gated_meas, sv_states, sol)
+        conops = self.conops_sm.step(float(t_s), integrity, sol, None) if self.conops_sm else None
+        output = {
+            "meas_raw": meas_raw,
+            "meas_attacked": meas_attacked,
+            "integrity": integrity,
+            "sol": sol,
+            "conops": conops,
+            "attack_report": attack_report,
+        }
+        if self.logger is not None:
+            self.logger(output)
+        self._update_last_state(sol, float(t_s))
+        return output
+
+    def _get_sv_states(self, t_s: float) -> list[Any]:
+        constellation = getattr(self.meas_src, "constellation", None)
+        if constellation is not None and hasattr(constellation, "get_sv_states"):
+            return list(constellation.get_sv_states(float(t_s)))
+        get_states = getattr(self.meas_src, "get_sv_states", None)
+        if callable(get_states):
+            return list(get_states(float(t_s)))
+        return []
+
+    def _apply_attacks(
+        self,
+        measurements: list[Any],
+        sv_states: list[Any],
+    ) -> tuple[list[Any], Any | None]:
+        if self.attack_pipeline is None:
+            return measurements, None
+        receiver_truth = getattr(self.meas_src, "receiver_truth", None)
+        if not isinstance(receiver_truth, ReceiverTruth):
+            return measurements, None
+        return self.attack_pipeline.apply(measurements, sv_states, rx_truth=receiver_truth)
+
+    def _gate_measurements(self, measurements: list[Any]) -> list[Any]:
+        if self.integrity_checker is not None and hasattr(self.integrity_checker, "gate"):
+            return list(self.integrity_checker.gate(measurements))
+        gate_cfg = self._default_gate_cfg
+        meas_cfg = getattr(self.meas_src, "cn0_min_dbhz", None)
+        if meas_cfg is not None:
+            gate_cfg = replace(gate_cfg, cn0_min_dbhz=float(meas_cfg))
+        kept, _ = prefit_filter(list(measurements), gate_cfg)
+        return kept
+
+    def _solve(
+        self,
+        measurements: list[Any],
+        sv_states: list[Any],
+        *,
+        t_s: float,
+    ) -> PvtSolution | None:
+        solver = self.solver
+        if solver is None:
+            return None
+        if hasattr(solver, "solve"):
+            return solver.solve(measurements, sv_states, t_s=t_s)
+        return solver(measurements, sv_states, t_s=t_s)
+
+    def _check_integrity(
+        self,
+        measurements: list[Any],
+        sv_states: list[Any],
+        sol: PvtSolution | None,
+    ) -> IntegrityReport:
+        if self.integrity_checker is None:
+            return _trivial_integrity_report(measurements, sol)
+        checker = self.integrity_checker
+        if hasattr(checker, "check"):
+            return checker.check(measurements, sv_states, sol)
+        return checker(measurements, sv_states, sol)
+
+    def _update_last_state(self, sol: PvtSolution | None, t_s: float) -> None:
+        self._last_t_s = t_s
+
+
+def _trivial_integrity_report(
+    measurements: list[Any],
+    sol: PvtSolution | None,
+) -> IntegrityReport:
+    if sol is None:
+        return IntegrityReport(
+            chi2=None,
+            p_value=None,
+            residual_rms=None,
+            num_sats_used=len(measurements),
+            num_rejected=0,
+            excluded_sv_ids=[],
+            is_suspect=False,
+            is_invalid=True,
+            reason_codes=["no_solution"],
+        )
+    return IntegrityReport(
+        chi2=None,
+        p_value=None,
+        residual_rms=sol.residuals.rms_m,
+        num_sats_used=sol.fix_flags.sv_count,
+        num_rejected=len(sol.fix_flags.sv_rejected),
+        excluded_sv_ids=[
+            sv_id
+            for sv_id in (_parse_sv_id(sv) for sv in sol.fix_flags.sv_rejected)
+            if sv_id is not None
+        ],
+        is_suspect=False,
+        is_invalid=sol.fix_flags.fix_type == "NO FIX",
+        reason_codes=["trivial"],
+    )
+
+
+def _parse_sv_id(sv_id: str) -> int | None:
+    digits = "".join(ch for ch in sv_id if ch.isdigit())
+    if not digits:
+        return None
+    return int(digits)
 
 
 class Engine:
