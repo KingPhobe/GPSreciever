@@ -227,6 +227,7 @@ def run_static_demo(cfg: SimConfig, run_dir: Path, save_figs: bool = True) -> Pa
         step = engine.step(float(t))
         sol = step["sol"]
         integrity = step["integrity"]
+        conops = step.get("conops")
         attack_report = step.get("attack_report")
         applied_count = getattr(attack_report, "applied_count", 0)
         if applied_count:
@@ -260,6 +261,13 @@ def run_static_demo(cfg: SimConfig, run_dir: Path, save_figs: bool = True) -> Pa
             attack_pr_bias_mean_m=attack_pr_bias_mean_m,
             attack_prr_bias_mean_mps=attack_prr_bias_mean_mps,
             innov_dim=None,
+            conops_status=conops.status.value if conops is not None else None,
+            conops_mode5=conops.mode5.value if conops is not None else None,
+            conops_reason_codes=list(conops.reason_codes) if conops is not None else [],
+            integrity_p_value=integrity.p_value,
+            integrity_residual_rms=integrity.residual_rms,
+            integrity_num_sats_used=integrity.num_sats_used,
+            integrity_excluded_sv_ids_count=len(integrity.excluded_sv_ids),
             per_sv_stats=per_sv_stats,
         )
         epochs.append(epoch_log)
@@ -267,8 +275,10 @@ def run_static_demo(cfg: SimConfig, run_dir: Path, save_figs: bool = True) -> Pa
     run_dir.mkdir(parents=True, exist_ok=True)
     if save_figs:
         from gnss_twin.plots import save_run_plots
+        from gnss_twin.plots.conops_plots import save_conops_plots
 
         output_dir = save_run_plots(epochs, out_dir=run_dir.parent, run_name=run_dir.name)
+        save_conops_plots(epochs, output_dir)
     else:
         output_dir = run_dir
     save_epochs_npz(output_dir / "epoch_logs.npz", epochs)

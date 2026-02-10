@@ -146,6 +146,13 @@ class EpochLog:
     attack_pr_bias_mean_m: float = 0.0
     attack_prr_bias_mean_mps: float = 0.0
     innov_dim: int | None = None
+    conops_status: str | None = None
+    conops_mode5: str | None = None
+    conops_reason_codes: list[str] = field(default_factory=list)
+    integrity_p_value: float | None = None
+    integrity_residual_rms: float | None = None
+    integrity_num_sats_used: int | None = None
+    integrity_excluded_sv_ids_count: int | None = None
     per_sv_stats: Mapping[str, Mapping[str, float]] = field(default_factory=dict)
 
 

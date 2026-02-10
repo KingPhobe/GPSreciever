@@ -38,6 +38,13 @@ EPOCH_CSV_COLUMNS = [
     "attack_active",
     "attack_pr_bias_mean_m",
     "attack_prr_bias_mean_mps",
+    "conops_status",
+    "conops_mode5",
+    "conops_reason_codes",
+    "integrity_p_value",
+    "integrity_residual_rms",
+    "integrity_num_sats_used",
+    "integrity_excluded_sv_ids_count",
 ]
 _CSV_HEADER = ",".join(EPOCH_CSV_COLUMNS) + "\n"
 
@@ -128,6 +135,13 @@ def _epoch_to_csv_line(epoch: EpochLog) -> str:
         _format_value(int(epoch.attack_active)),
         _format_value(epoch.attack_pr_bias_mean_m),
         _format_value(epoch.attack_prr_bias_mean_mps),
+        epoch.conops_status or "",
+        epoch.conops_mode5 or "",
+        "|".join(epoch.conops_reason_codes),
+        _format_value(epoch.integrity_p_value),
+        _format_value(epoch.integrity_residual_rms),
+        _format_value(epoch.integrity_num_sats_used),
+        _format_value(epoch.integrity_excluded_sv_ids_count),
     ]
     return ",".join(str(value) for value in row) + "\n"
 

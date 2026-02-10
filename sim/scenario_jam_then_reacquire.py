@@ -12,6 +12,7 @@ from gnss_twin.attacks.jamming import JamCn0DropAttack
 from gnss_twin.config import SimConfig
 from gnss_twin.integrity.flags import IntegrityConfig, SvTracker, integrity_pvt
 from gnss_twin.logger import save_epochs_csv, save_epochs_npz
+from gnss_twin.plots.conops_plots import save_conops_plots
 from gnss_twin.models import EpochLog, FixType, GnssMeasurement, PvtSolution, ReceiverTruth, fix_type_from_label
 from gnss_twin.receiver.ekf_nav import EkfNav
 from gnss_twin.receiver.gating import postfit_gate
@@ -200,6 +201,13 @@ def run_scenario() -> dict[str, float | int | None]:
             nis_alarm=integrity.is_suspect or integrity.is_invalid,
             attack_name=attack_name,
             attack_active=attack_active,
+            conops_status=conops.status.value,
+            conops_mode5=conops.mode5.value,
+            conops_reason_codes=list(conops.reason_codes),
+            integrity_p_value=integrity.p_value,
+            integrity_residual_rms=integrity.residual_rms,
+            integrity_num_sats_used=integrity.num_sats_used,
+            integrity_excluded_sv_ids_count=len(integrity.excluded_sv_ids),
             per_sv_stats=integrity_checker.last_per_sv_stats,
         )
         epochs.append(epoch)
@@ -217,6 +225,7 @@ def run_scenario() -> dict[str, float | int | None]:
     out_dir.mkdir(parents=True, exist_ok=True)
     save_epochs_csv(out_dir / "epoch_logs.csv", epochs)
     save_epochs_npz(out_dir / "epoch_logs.npz", epochs)
+    save_conops_plots(epochs, out_dir)
 
     summary = {
         "scenario": "jam_then_reacquire",

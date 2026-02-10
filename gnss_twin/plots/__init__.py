@@ -7,7 +7,10 @@ from pathlib import Path
 
 import matplotlib
 import numpy as np
-import pandas as pd
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 from gnss_twin.models import EpochLog
 
@@ -28,7 +31,7 @@ def save_run_plots(
 
 
 def plot_update(
-    data: pd.DataFrame,
+    data: Any,
     *,
     out_dir: str | Path = "out",
     run_name: str | None = None,
@@ -45,7 +48,7 @@ def plot_update(
     return output_dir
 
 
-def plot_position_error(data: pd.DataFrame, path: str | Path) -> None:
+def plot_position_error(data: Any, path: str | Path) -> None:
     times = _series_or_nan(data, "t_s")
     if "pos_error_m" in data.columns:
         errors = data["pos_error_m"].to_numpy(dtype=float)
@@ -54,19 +57,19 @@ def plot_position_error(data: pd.DataFrame, path: str | Path) -> None:
     _plot_position_error(times, errors, Path(path))
 
 
-def plot_clock_bias(data: pd.DataFrame, path: str | Path) -> None:
+def plot_clock_bias(data: Any, path: str | Path) -> None:
     times = _series_or_nan(data, "t_s")
     clk_bias = _series_or_nan(data, "clk_bias_s")
     _plot_clock_bias(times, clk_bias, Path(path))
 
 
-def plot_residual_rms(data: pd.DataFrame, path: str | Path) -> None:
+def plot_residual_rms(data: Any, path: str | Path) -> None:
     times = _series_or_nan(data, "t_s")
     residual_rms = _series_or_nan(data, "residual_rms_m")
     _plot_residual_rms(times, residual_rms, Path(path))
 
 
-def plot_dop(data: pd.DataFrame, path: str | Path) -> None:
+def plot_dop(data: Any, path: str | Path) -> None:
     times = _series_or_nan(data, "t_s")
     dop = np.vstack(
         [
@@ -79,21 +82,23 @@ def plot_dop(data: pd.DataFrame, path: str | Path) -> None:
     _plot_dop(times, dop, Path(path))
 
 
-def plot_sv_used(data: pd.DataFrame, path: str | Path) -> None:
+def plot_sv_used(data: Any, path: str | Path) -> None:
     times = _series_or_nan(data, "t_s")
     sv_used = _series_or_nan(data, "sats_used")
     _plot_sv_used(times, sv_used, Path(path))
 
 
-def plot_fix_status(data: pd.DataFrame, path: str | Path) -> None:
+def plot_fix_status(data: Any, path: str | Path) -> None:
     times = _series_or_nan(data, "t_s")
     fix_type = _series_or_nan(data, "fix_type")
     fix_valid = _series_or_nan(data, "fix_valid")
     _plot_fix_status(times, fix_type, fix_valid, Path(path))
 
 
-def epochs_to_frame(epochs: list[EpochLog]) -> pd.DataFrame:
+def epochs_to_frame(epochs: list[EpochLog]) -> Any:
     """Build a DataFrame from EpochLog entries for GUI plotting."""
+
+    import pandas as pd
 
     payload = []
     for epoch in epochs:
@@ -136,7 +141,7 @@ def epochs_to_frame(epochs: list[EpochLog]) -> pd.DataFrame:
     return pd.DataFrame(payload)
 
 
-def _series_or_nan(data: pd.DataFrame, column: str) -> np.ndarray:
+def _series_or_nan(data: Any, column: str) -> np.ndarray:
     if column in data.columns:
         return data[column].to_numpy(dtype=float)
     return np.full(len(data), float("nan"))
