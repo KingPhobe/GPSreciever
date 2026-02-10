@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from gnss_twin.attacks.base import AttackDelta, AttackModel
 from gnss_twin.attacks.jamming import JamCn0DropAttack
+from gnss_twin.attacks.pipeline import AttackPipeline
 from gnss_twin.attacks.spoofing import SpoofClockRampAttack, SpoofPrRampAttack
 
 if TYPE_CHECKING:
@@ -63,6 +64,7 @@ def create_attack(name: str, params: dict) -> AttackModel:
 __all__ = [
     "AttackModel",
     "AttackDelta",
+    "AttackPipeline",
     "NoOpAttack",
     "JamCn0DropAttack",
     "SpoofClockRampAttack",

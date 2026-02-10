@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import random
 from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
 
+from gnss_twin.attacks import AttackPipeline, create_attack
 from gnss_twin.config import SimConfig
 from gnss_twin.logger import save_epochs_csv, save_epochs_npz
 from gnss_twin.models import (
@@ -19,19 +21,138 @@ from gnss_twin.models import (
     ReceiverTruth,
     ResidualStats,
     SvState,
+    fix_type_from_label,
 )
 from gnss_twin.meas.pseudorange import SyntheticMeasurementSource
-from gnss_twin.runtime import Engine
+from gnss_twin.integrity.flags import IntegrityConfig, SvTracker, integrity_pvt
+from gnss_twin.receiver.ekf_nav import EkfNav
+from gnss_twin.receiver.gating import postfit_gate
+from gnss_twin.receiver.wls_pvt import wls_pvt
+from gnss_twin.runtime import (
+    ConopsStateMachine,
+    RaimIntegrityChecker,
+    SimulationEngine,
+    default_pnt_config,
+)
+from gnss_twin.sat.simple_gps import SimpleGpsConfig, SimpleGpsConstellation
 from gnss_twin.sat.visibility import visible_sv_states
 from gnss_twin.utils.angles import elev_az_from_rx_sv
 from gnss_twin.utils.wgs84 import ecef_to_lla, lla_to_ecef
 
 
+class _DemoSolver:
+    def __init__(self, cfg: SimConfig, initial_pos: np.ndarray, initial_clk: float) -> None:
+        self.cfg = cfg
+        self.integrity_cfg = IntegrityConfig()
+        self.tracker = SvTracker(self.integrity_cfg)
+        self.last_pos = initial_pos + 100.0
+        self.last_clk = float(initial_clk)
+        self.last_t_s: float | None = None
+        self.ekf = EkfNav() if cfg.use_ekf else None
+
+    def solve(
+        self,
+        measurements: list[GnssMeasurement],
+        sv_states: list[SvState],
+        *,
+        t_s: float | None = None,
+    ) -> PvtSolution | None:
+        used_meas = list(measurements)
+        wls_solution = None
+        if len(used_meas) >= 4:
+            wls_solution = wls_pvt(
+                used_meas,
+                sv_states,
+                initial_pos_ecef_m=self.last_pos,
+                initial_clk_bias_s=self.last_clk,
+            )
+            if wls_solution is not None:
+                sigmas_by_sv = {m.sv_id: m.sigma_pr_m for m in used_meas}
+                offender = postfit_gate(
+                    wls_solution.residuals_m,
+                    sigmas_by_sv,
+                    gate=self.cfg.postfit_gate_sigma,
+                )
+                if offender:
+                    used_meas = [m for m in used_meas if m.sv_id != offender]
+
+        solution, _ = integrity_pvt(
+            used_meas,
+            sv_states,
+            initial_pos_ecef_m=self.last_pos,
+            initial_clk_bias_s=self.last_clk,
+            config=self.integrity_cfg,
+            tracker=self.tracker,
+        )
+
+        if self.ekf is not None:
+            dt = self.cfg.dt if self.last_t_s is None or t_s is None else float(t_s - self.last_t_s)
+            if not self.ekf.initialized and wls_solution is not None:
+                self.ekf.initialize_from_wls(wls_solution)
+            if self.ekf.initialized and self.last_t_s is not None and t_s is not None:
+                self.ekf.predict(dt)
+            if self.ekf.initialized:
+                self.ekf.update_pseudorange(
+                    used_meas,
+                    sv_states,
+                    initial_pos_ecef_m=self.last_pos,
+                    initial_clk_bias_s=self.last_clk,
+                )
+                self.ekf.update_prr(used_meas, sv_states)
+                solution = PvtSolution(
+                    pos_ecef=self.ekf.pos_ecef_m.copy(),
+                    vel_ecef=self.ekf.vel_ecef_mps.copy(),
+                    clk_bias_s=self.ekf.clk_bias_s,
+                    clk_drift_sps=self.ekf.clk_drift_sps,
+                    dop=solution.dop,
+                    residuals=solution.residuals,
+                    fix_flags=solution.fix_flags,
+                )
+
+        self.last_t_s = t_s
+        if solution.fix_flags.fix_type != "NO FIX" and np.isfinite(solution.pos_ecef).all():
+            self.last_pos = solution.pos_ecef
+            self.last_clk = solution.clk_bias_s
+        return solution
+
+
 def run_static_demo(cfg: SimConfig, run_dir: Path, save_figs: bool = True) -> Path:
-    engine = Engine(cfg)
-    receiver_lla = engine.receiver_lla
-    receiver_truth = engine.receiver_truth_ecef
-    receiver_clock = engine.receiver_clock
+    seed = int(cfg.rng_seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    rng = np.random.default_rng(seed)
+    receiver_lla = (37.4275, -122.1697, 30.0)
+    receiver_truth = lla_to_ecef(*receiver_lla)
+    receiver_clock = 4.2e-6
+    receiver_truth_state = ReceiverTruth(
+        pos_ecef_m=receiver_truth,
+        vel_ecef_mps=np.zeros(3),
+        clk_bias_s=receiver_clock,
+        clk_drift_sps=0.0,
+    )
+    constellation = SimpleGpsConstellation(SimpleGpsConfig(seed=seed))
+    measurement_source = SyntheticMeasurementSource(
+        constellation=constellation,
+        receiver_truth=receiver_truth_state,
+        cn0_zenith_dbhz=47.0,
+        cn0_min_dbhz=cfg.cn0_min_dbhz,
+        rng=rng,
+    )
+    attack_name = cfg.attack_name or "none"
+    attacks = [] if attack_name.lower() == "none" else [create_attack(attack_name, cfg.attack_params)]
+    attack_pipeline = AttackPipeline(attacks) if attacks else None
+    if attack_pipeline is not None:
+        attack_pipeline.reset(seed)
+    integrity_checker = RaimIntegrityChecker(sim_cfg=cfg)
+    conops_sm = ConopsStateMachine(default_pnt_config())
+    solver = _DemoSolver(cfg, receiver_truth, receiver_clock)
+    engine = SimulationEngine(
+        measurement_source,
+        solver,
+        integrity_checker,
+        attack_pipeline,
+        conops_sm,
+    )
     dummy_meas = GnssMeasurement(
         sv_id="G01",
         t=0.0,
@@ -72,12 +193,7 @@ def run_static_demo(cfg: SimConfig, run_dir: Path, save_figs: bool = True) -> Pa
             chi_square_threshold=3.8,
         ),
     )
-    dummy_truth = ReceiverTruth(
-        pos_ecef_m=receiver_truth,
-        vel_ecef_mps=np.zeros(3),
-        clk_bias_s=receiver_clock,
-        clk_drift_sps=0.0,
-    )
+    dummy_truth = receiver_truth_state
     epoch_log = EpochLog(
         t=0.0,
         meas=[dummy_meas],
@@ -94,7 +210,6 @@ def run_static_demo(cfg: SimConfig, run_dir: Path, save_figs: bool = True) -> Pa
     elev_deg, az_deg = elev_az_from_rx_sv(receiver_truth, sv_overhead)
     print(f"Sample elevation/azimuth (deg): ({elev_deg:.2f}, {az_deg:.2f})")
 
-    measurement_source: SyntheticMeasurementSource = engine.measurement_source
     first_epoch_meas = measurement_source.get_measurements(0.0)
     print("First-epoch pseudoranges (m):")
     for meas in first_epoch_meas:
@@ -102,11 +217,52 @@ def run_static_demo(cfg: SimConfig, run_dir: Path, save_figs: bool = True) -> Pa
             f"  {meas.sv_id}: {meas.pr_m:.3f} (elev {meas.elev_deg:.2f} deg, cn0 {meas.cn0_dbhz:.1f})"
         )
     for t in range(5):
-        sv_states = engine.constellation.get_sv_states(float(t))
+        sv_states = constellation.get_sv_states(float(t))
         visible = visible_sv_states(receiver_truth, sv_states, elevation_mask_deg=cfg.elev_mask_deg)
         print(f"{len(visible)} visible satellites at t={t}s")
 
-    epochs = engine.run(0.0, cfg.duration, cfg.dt)
+    epochs = []
+    times = np.arange(0.0, cfg.duration, cfg.dt)
+    for t in times:
+        step = engine.step(float(t))
+        sol = step["sol"]
+        integrity = step["integrity"]
+        attack_report = step.get("attack_report")
+        applied_count = getattr(attack_report, "applied_count", 0)
+        if applied_count:
+            attack_pr_bias_mean_m = attack_report.pr_bias_sum_m / applied_count
+            attack_prr_bias_mean_mps = attack_report.prr_bias_sum_mps / applied_count
+        else:
+            attack_pr_bias_mean_m = 0.0
+            attack_prr_bias_mean_mps = 0.0
+        per_sv_stats = getattr(integrity_checker, "last_per_sv_stats", {})
+        epoch_log = EpochLog(
+            t=float(t),
+            meas=step["meas_attacked"],
+            solution=sol,
+            truth=receiver_truth_state,
+            t_s=float(t),
+            fix_valid=sol.fix_flags.valid if sol is not None else None,
+            fix_type=fix_type_from_label(sol.fix_flags.fix_type) if sol is not None else None,
+            sats_used=sol.fix_flags.sv_count if sol is not None else None,
+            pdop=sol.dop.pdop if sol is not None else None,
+            hdop=sol.dop.hdop if sol is not None else None,
+            vdop=sol.dop.vdop if sol is not None else None,
+            residual_rms_m=sol.residuals.rms_m if sol is not None else None,
+            pos_ecef=sol.pos_ecef.copy() if sol is not None else None,
+            vel_ecef=sol.vel_ecef.copy() if sol is not None and sol.vel_ecef is not None else None,
+            clk_bias_s=sol.clk_bias_s if sol is not None else None,
+            clk_drift_sps=sol.clk_drift_sps if sol is not None else None,
+            nis=None,
+            nis_alarm=integrity.is_suspect or integrity.is_invalid,
+            attack_name=attack_name,
+            attack_active=applied_count > 0,
+            attack_pr_bias_mean_m=attack_pr_bias_mean_m,
+            attack_prr_bias_mean_mps=attack_prr_bias_mean_mps,
+            innov_dim=None,
+            per_sv_stats=per_sv_stats,
+        )
+        epochs.append(epoch_log)
 
     run_dir.mkdir(parents=True, exist_ok=True)
     if save_figs:
