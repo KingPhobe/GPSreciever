@@ -120,6 +120,9 @@ class RaimIntegrityChecker:
             reason_codes.append("raim_fail")
         if is_invalid:
             reason_codes.append("insufficient_sats")
+        if len(excluded_sv_ids) > 0:
+            reason_codes.append("sv_rejected")
+        is_suspect = (not passed) or (len(excluded_sv_ids) > 0)
         return IntegrityReport(
             chi2=t_stat if np.isfinite(t_stat) else None,
             p_value=p_value,
@@ -127,7 +130,7 @@ class RaimIntegrityChecker:
             num_sats_used=integrity_solution.fix_flags.sv_count,
             num_rejected=len(integrity_solution.fix_flags.sv_rejected),
             excluded_sv_ids=excluded_sv_ids,
-            is_suspect=not passed,
+            is_suspect=is_suspect,
             is_invalid=is_invalid,
             reason_codes=reason_codes or ["integrity_ok"],
         )
