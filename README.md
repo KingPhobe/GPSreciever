@@ -38,7 +38,7 @@ Baseline run:
 python -m sim.live_runner --duration-s 60 --use-ekf --attack-name none
 ```
 
-Spoofed pseudorange ramp:
+Spoof ramp example:
 
 ```bash
 python -m sim.live_runner --duration-s 60 --use-ekf --attack-name spoof_pr_ramp --attack-param target_sv=G12 --attack-param start_t=10 --attack-param slope_mps=2
