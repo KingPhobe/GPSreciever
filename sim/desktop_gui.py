@@ -7,10 +7,10 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import (
+from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
@@ -31,13 +31,12 @@ from PySide6.QtWidgets import (
 )
 
 from gnss_twin.config import SimConfig
-from gnss_twin.logger import save_epochs_csv
 from gnss_twin.models import EpochLog, ReceiverTruth
 from gnss_twin.plots import epochs_to_frame, plot_update
 from sim.run_static_demo import build_engine_with_truth, build_epoch_log
 
 
-class DesktopGui(QMainWindow):
+class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("GNSS Twin Desktop GUI")
@@ -170,7 +169,7 @@ class DesktopGui(QMainWindow):
         box = QWidget()
         layout = QVBoxLayout(box)
         self.figure = Figure(figsize=(8, 8))
-        self.canvas = FigureCanvasQTAgg(self.figure)
+        self.canvas = FigureCanvas(self.figure)
         self.ax_pdop = self.figure.add_subplot(311)
         self.ax_residual = self.figure.add_subplot(312)
         self.ax_clock = self.figure.add_subplot(313)
@@ -323,28 +322,27 @@ class DesktopGui(QMainWindow):
 
         default_dir = Path("out")
         default_dir.mkdir(parents=True, exist_ok=True)
-        selected = QFileDialog.getExistingDirectory(self, "Select output directory", str(default_dir))
-        if not selected:
+        out_dir = QFileDialog.getExistingDirectory(self, "Select output folder", str(default_dir))
+        if not out_dir:
             return
 
-        parent = Path(selected)
         run_name = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        run_dir = parent / run_name
+        run_dir = Path(out_dir) / run_name
         run_dir.mkdir(parents=True, exist_ok=True)
 
         df = epochs_to_frame(self.epochs)
         self.frame = df
         df.to_csv(run_dir / "run_table.csv", index=False)
-        save_epochs_csv(run_dir / "epochs.csv", self.epochs)
-        plot_update(df, out_dir=parent, run_name=run_name)
+        plot_update(df, out_dir=str(run_dir), run_name=None)
 
         QMessageBox.information(self, "Saved", f"Saved PNG plots and CSV files to {run_dir}")
 
 
 def main() -> None:
     app = QApplication(sys.argv)
-    window = DesktopGui()
-    window.show()
+    win = MainWindow()
+    win.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+    win.show()
     sys.exit(app.exec())
 
 
