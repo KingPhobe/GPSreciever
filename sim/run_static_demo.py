@@ -116,8 +116,8 @@ class _DemoSolver:
         return solution
 
 
-def build_engine(cfg: SimConfig) -> tuple[SimulationEngine, ReceiverTruth, RaimIntegrityChecker]:
-    """Build the standard demo simulation engine pipeline."""
+def build_engine(cfg: SimConfig) -> SimulationEngine:
+    """Return a fully wired SimulationEngine identical to the static demo wiring."""
     seed = int(cfg.rng_seed)
     np.random.seed(seed)
     random.seed(seed)
@@ -153,17 +153,19 @@ def build_engine(cfg: SimConfig) -> tuple[SimulationEngine, ReceiverTruth, RaimI
         attack_pipeline,
         conops_sm,
     )
-    return engine, receiver_truth_state, integrity_checker
+    return engine
 
 
 def run_static_demo(cfg: SimConfig, run_dir: Path, save_figs: bool = True) -> Path:
-    engine, receiver_truth_state, integrity_checker = build_engine(cfg)
+    engine = build_engine(cfg)
     seed = int(cfg.rng_seed)
     np.random.seed(seed)
     random.seed(seed)
+    receiver_truth_state = engine.meas_src.receiver_truth
     receiver_truth = receiver_truth_state.pos_ecef_m
     receiver_clock = receiver_truth_state.clk_bias_s
     measurement_source = engine.meas_src
+    integrity_checker = engine.integrity_checker
     constellation = measurement_source.constellation
     dummy_meas = GnssMeasurement(
         sv_id="G01",
