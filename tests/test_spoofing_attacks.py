@@ -87,3 +87,72 @@ def test_create_attack_requires_target_sv() -> None:
 def test_create_attack_returns_spoof_clock_ramp() -> None:
     attack = create_attack("spoof_clock_ramp", {"start_t": 10.0, "ramp_rate_mps": 2.5})
     assert isinstance(attack, SpoofClockRampAttack)
+
+
+def test_spoof_clock_ramp_attack_respects_end_t() -> None:
+    attack = SpoofClockRampAttack(start_t=10.0, end_t=20.0, ramp_rate_mps=50.0)
+    rx_truth = _make_rx_truth()
+    sv_state = _make_sv_state("G01", 10.0)
+
+    before = _make_measurement(sv_id="G01", t=9.0, pr_m=1_000.0, prr_mps=0.0)
+    at_start = _make_measurement(sv_id="G01", t=10.0, pr_m=1_000.0, prr_mps=0.0)
+    active = _make_measurement(sv_id="G01", t=15.0, pr_m=1_000.0, prr_mps=0.0)
+    after = _make_measurement(sv_id="G01", t=21.0, pr_m=1_000.0, prr_mps=0.0)
+
+    unchanged, delta = attack.apply(before, sv_state, rx_truth=rx_truth)
+    assert unchanged is before
+    assert not delta.applied
+
+    modified, delta = attack.apply(at_start, sv_state, rx_truth=rx_truth)
+    assert delta.applied
+    assert modified.pr_m == 1_000.0
+
+    modified, delta = attack.apply(active, sv_state, rx_truth=rx_truth)
+    assert delta.applied
+    assert modified.pr_m == 1_000.0 + 250.0
+
+    unchanged, delta = attack.apply(after, sv_state, rx_truth=rx_truth)
+    assert unchanged is after
+    assert not delta.applied
+
+
+def test_spoof_pr_ramp_attack_respects_end_t() -> None:
+    attack = SpoofPrRampAttack(start_t=10.0, end_t=20.0, ramp_rate_mps=50.0, target_sv="G02")
+    rx_truth = _make_rx_truth()
+    sv_state = _make_sv_state("G02", 10.0)
+
+    before = _make_measurement(sv_id="G02", t=9.0, pr_m=1_000.0, prr_mps=0.0)
+    at_start = _make_measurement(sv_id="G02", t=10.0, pr_m=1_000.0, prr_mps=0.0)
+    active = _make_measurement(sv_id="G02", t=15.0, pr_m=1_000.0, prr_mps=0.0)
+    after = _make_measurement(sv_id="G02", t=21.0, pr_m=1_000.0, prr_mps=0.0)
+
+    unchanged, delta = attack.apply(before, sv_state, rx_truth=rx_truth)
+    assert unchanged is before
+    assert not delta.applied
+
+    modified, delta = attack.apply(at_start, sv_state, rx_truth=rx_truth)
+    assert delta.applied
+    assert modified.pr_m == 1_000.0
+
+    modified, delta = attack.apply(active, sv_state, rx_truth=rx_truth)
+    assert delta.applied
+    assert modified.pr_m == 1_000.0 + 250.0
+
+    unchanged, delta = attack.apply(after, sv_state, rx_truth=rx_truth)
+    assert unchanged is after
+    assert not delta.applied
+
+
+def test_create_attack_accepts_optional_end_t() -> None:
+    clock_attack = create_attack(
+        "spoof_clock_ramp", {"start_t": 10.0, "end_t": 20.0, "ramp_rate_mps": 2.5}
+    )
+    assert isinstance(clock_attack, SpoofClockRampAttack)
+    assert clock_attack.end_t == 20.0
+
+    pr_attack = create_attack(
+        "spoof_pr_ramp",
+        {"target_sv": "G02", "start_t": 10.0, "end_t": 20.0, "ramp_rate_mps": 2.5},
+    )
+    assert isinstance(pr_attack, SpoofPrRampAttack)
+    assert pr_attack.end_t == 20.0
