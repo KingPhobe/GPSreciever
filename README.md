@@ -32,7 +32,7 @@ python sim/scenario_runner.py --scenarios sim/scenarios/phase1_baseline.json
 
 ## GUI (native desktop)
 
-Install with GUI extras:
+Install with GUI extras (PyQt6 on Windows-friendly Qt bindings):
 
 ```bash
 pip install -e ".[gui]"
