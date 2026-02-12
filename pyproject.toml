@@ -12,14 +12,16 @@ dependencies = [
     "numpy>=1.23",
     "scipy",
     "matplotlib",
+    "pandas",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
+gui = ["PySide6>=6.5"]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["gnss_twin*"]
+include = ["gnss_twin*", "sim*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
