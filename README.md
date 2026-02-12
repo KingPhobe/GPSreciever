@@ -30,25 +30,27 @@ Run scenarios from JSON configs:
 python sim/scenario_runner.py --scenarios sim/scenarios/phase1_baseline.json
 ```
 
-## GUI (Streamlit, engine-direct)
+## GUI (native desktop)
 
-Install Streamlit:
-
-```bash
-pip install streamlit
-```
-
-Run the GUI:
+Install with GUI extras:
 
 ```bash
-streamlit run sim/gui_app.py
+pip install -e ".[gui]"
 ```
+
+Run the desktop GUI:
+
+```bash
+python -m sim.desktop_gui
+```
+
+Streamlit is no longer required for the interactive GUI flow.
 
 Demo tips:
 
 - Click **Initialize / Reset** after changing controls to rebuild the engine with the new scenario.
-- Press **Play** for live stepping (or **Step** for single-epoch updates, **Pause** to stop).
-- Select **spoof_pr_ramp** to trigger a visible integrity-event walkthrough with changing attack telemetry.
+- Press **Run** for continuous stepping (**Step** for single-epoch updates, **Stop** to halt).
+- Use **Save plots** to export standard PNG plots and a full `run_table.csv`.
 
 ## Live demo / interactive playback
 

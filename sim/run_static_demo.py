@@ -116,8 +116,8 @@ class _DemoSolver:
         return solution
 
 
-def build_engine(cfg: SimConfig) -> SimulationEngine:
-    """Return a fully wired SimulationEngine identical to the static demo wiring."""
+def build_engine_with_truth(cfg: SimConfig) -> tuple[SimulationEngine, ReceiverTruth]:
+    """Return a fully wired SimulationEngine and receiver truth state."""
     seed = int(cfg.rng_seed)
     np.random.seed(seed)
     random.seed(seed)
@@ -153,15 +153,76 @@ def build_engine(cfg: SimConfig) -> SimulationEngine:
         attack_pipeline,
         conops_sm,
     )
+    return engine, receiver_truth_state
+
+
+def build_engine(cfg: SimConfig) -> SimulationEngine:
+    """Return a fully wired SimulationEngine identical to the static demo wiring."""
+    engine, _ = build_engine_with_truth(cfg)
     return engine
 
 
+def build_epoch_log(
+    *,
+    t_s: float,
+    step_out: dict,
+    receiver_truth_state: ReceiverTruth,
+    integrity_checker: RaimIntegrityChecker,
+    attack_name: str,
+) -> EpochLog:
+    """Build an EpochLog entry from a SimulationEngine step output."""
+    sol = step_out["sol"]
+    integrity = step_out["integrity"]
+    conops = step_out.get("conops")
+    attack_report = step_out.get("attack_report")
+    applied_count = getattr(attack_report, "applied_count", 0)
+    if applied_count:
+        attack_pr_bias_mean_m = attack_report.pr_bias_sum_m / applied_count
+        attack_prr_bias_mean_mps = attack_report.prr_bias_sum_mps / applied_count
+    else:
+        attack_pr_bias_mean_m = 0.0
+        attack_prr_bias_mean_mps = 0.0
+    per_sv_stats = getattr(integrity_checker, "last_per_sv_stats", {})
+    return EpochLog(
+        t=float(t_s),
+        meas=step_out["meas_attacked"],
+        solution=sol,
+        truth=receiver_truth_state,
+        t_s=float(t_s),
+        fix_valid=sol.fix_flags.valid if sol is not None else None,
+        fix_type=fix_type_from_label(sol.fix_flags.fix_type) if sol is not None else None,
+        sats_used=sol.fix_flags.sv_count if sol is not None else None,
+        pdop=sol.dop.pdop if sol is not None else None,
+        hdop=sol.dop.hdop if sol is not None else None,
+        vdop=sol.dop.vdop if sol is not None else None,
+        residual_rms_m=sol.residuals.rms_m if sol is not None else None,
+        pos_ecef=sol.pos_ecef.copy() if sol is not None else None,
+        vel_ecef=sol.vel_ecef.copy() if sol is not None and sol.vel_ecef is not None else None,
+        clk_bias_s=sol.clk_bias_s if sol is not None else None,
+        clk_drift_sps=sol.clk_drift_sps if sol is not None else None,
+        nis=None,
+        nis_alarm=integrity.is_suspect or integrity.is_invalid,
+        attack_name=attack_name,
+        attack_active=applied_count > 0,
+        attack_pr_bias_mean_m=attack_pr_bias_mean_m,
+        attack_prr_bias_mean_mps=attack_prr_bias_mean_mps,
+        innov_dim=None,
+        conops_status=conops.status.value if conops is not None else None,
+        conops_mode5=conops.mode5.value if conops is not None else None,
+        conops_reason_codes=list(conops.reason_codes) if conops is not None else [],
+        integrity_p_value=integrity.p_value,
+        integrity_residual_rms=integrity.residual_rms,
+        integrity_num_sats_used=integrity.num_sats_used,
+        integrity_excluded_sv_ids_count=len(integrity.excluded_sv_ids),
+        per_sv_stats=per_sv_stats,
+    )
+
+
 def run_static_demo(cfg: SimConfig, run_dir: Path, save_figs: bool = True) -> Path:
-    engine = build_engine(cfg)
+    engine, receiver_truth_state = build_engine_with_truth(cfg)
     seed = int(cfg.rng_seed)
     np.random.seed(seed)
     random.seed(seed)
-    receiver_truth_state = engine.meas_src.receiver_truth
     receiver_truth = receiver_truth_state.pos_ecef_m
     receiver_clock = receiver_truth_state.clk_bias_s
     measurement_source = engine.meas_src
@@ -240,50 +301,12 @@ def run_static_demo(cfg: SimConfig, run_dir: Path, save_figs: bool = True) -> Pa
     attack_name = cfg.attack_name or "none"
     for t in times:
         step = engine.step(float(t))
-        sol = step["sol"]
-        integrity = step["integrity"]
-        conops = step.get("conops")
-        attack_report = step.get("attack_report")
-        applied_count = getattr(attack_report, "applied_count", 0)
-        if applied_count:
-            attack_pr_bias_mean_m = attack_report.pr_bias_sum_m / applied_count
-            attack_prr_bias_mean_mps = attack_report.prr_bias_sum_mps / applied_count
-        else:
-            attack_pr_bias_mean_m = 0.0
-            attack_prr_bias_mean_mps = 0.0
-        per_sv_stats = getattr(integrity_checker, "last_per_sv_stats", {})
-        epoch_log = EpochLog(
-            t=float(t),
-            meas=step["meas_attacked"],
-            solution=sol,
-            truth=receiver_truth_state,
+        epoch_log = build_epoch_log(
             t_s=float(t),
-            fix_valid=sol.fix_flags.valid if sol is not None else None,
-            fix_type=fix_type_from_label(sol.fix_flags.fix_type) if sol is not None else None,
-            sats_used=sol.fix_flags.sv_count if sol is not None else None,
-            pdop=sol.dop.pdop if sol is not None else None,
-            hdop=sol.dop.hdop if sol is not None else None,
-            vdop=sol.dop.vdop if sol is not None else None,
-            residual_rms_m=sol.residuals.rms_m if sol is not None else None,
-            pos_ecef=sol.pos_ecef.copy() if sol is not None else None,
-            vel_ecef=sol.vel_ecef.copy() if sol is not None and sol.vel_ecef is not None else None,
-            clk_bias_s=sol.clk_bias_s if sol is not None else None,
-            clk_drift_sps=sol.clk_drift_sps if sol is not None else None,
-            nis=None,
-            nis_alarm=integrity.is_suspect or integrity.is_invalid,
+            step_out=step,
+            receiver_truth_state=receiver_truth_state,
+            integrity_checker=integrity_checker,
             attack_name=attack_name,
-            attack_active=applied_count > 0,
-            attack_pr_bias_mean_m=attack_pr_bias_mean_m,
-            attack_prr_bias_mean_mps=attack_prr_bias_mean_mps,
-            innov_dim=None,
-            conops_status=conops.status.value if conops is not None else None,
-            conops_mode5=conops.mode5.value if conops is not None else None,
-            conops_reason_codes=list(conops.reason_codes) if conops is not None else [],
-            integrity_p_value=integrity.p_value,
-            integrity_residual_rms=integrity.residual_rms,
-            integrity_num_sats_used=integrity.num_sats_used,
-            integrity_excluded_sv_ids_count=len(integrity.excluded_sv_ids),
-            per_sv_stats=per_sv_stats,
         )
         epochs.append(epoch_log)
 
