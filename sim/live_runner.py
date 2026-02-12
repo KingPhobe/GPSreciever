@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 import random
 import time
+from pathlib import Path
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -168,6 +170,14 @@ def _build_engine(cfg: SimConfig) -> SimulationEngine:
     )
 
 
+def _json_safe_number(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, (float, np.floating)) and np.isnan(value):
+        return None
+    return value
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run interactive live GNSS twin simulation.")
     parser.add_argument("--duration-s", type=float, default=60.0, help="Duration in seconds.")
@@ -202,6 +212,12 @@ def main() -> None:
         action="store_true",
         help="Disable matplotlib UI and run loop in console-only mode.",
     )
+    parser.add_argument(
+        "--out-jsonl",
+        type=str,
+        default=None,
+        help="Path to optional JSONL telemetry output for each epoch.",
+    )
     args = parser.parse_args()
 
     attack_params = parse_kv_list(args.attack_param)
@@ -225,71 +241,112 @@ def main() -> None:
 
     sim_times = np.arange(0.0, cfg.duration + 1e-9, dt)
     last_tick = time.perf_counter()
+    jsonl_fp = None
 
-    for t_s in sim_times:
-        if controller.quit_requested:
-            break
+    if args.out_jsonl:
+        out_jsonl_path = Path(args.out_jsonl)
+        out_jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+        jsonl_fp = out_jsonl_path.open("w", encoding="utf-8")
 
-        while controller.paused and not controller.step_once and not controller.quit_requested:
-            if plotter is not None:
-                plt.pause(0.05)
+    try:
+        for t_s in sim_times:
+            if controller.quit_requested:
+                break
+
+            while controller.paused and not controller.step_once and not controller.quit_requested:
+                if plotter is not None:
+                    plt.pause(0.05)
+                else:
+                    time.sleep(0.05)
+
+            if controller.quit_requested:
+                break
+
+            controller.step_once = False
+            step = engine.step(float(t_s))
+            sol = step.get("sol")
+            integrity = step.get("integrity")
+            conops = step.get("conops")
+            attack_report = step.get("attack_report")
+
+            fix_flags = getattr(sol, "fix_flags", None)
+            dop = getattr(sol, "dop", None)
+            residuals = getattr(sol, "residuals", None)
+
+            fix_valid = bool(getattr(fix_flags, "valid", False))
+            fix_type = getattr(fix_flags, "fix_type", "NO FIX")
+            sats_used = int(getattr(fix_flags, "sv_count", 0) or 0)
+            pdop = float(getattr(dop, "pdop", np.nan))
+            residual_rms_m = float(getattr(residuals, "rms_m", np.nan))
+            clk_bias_s = float(getattr(sol, "clk_bias_s", np.nan))
+            clk_drift_sps = float(getattr(sol, "clk_drift_sps", np.nan))
+            nis = float(getattr(integrity, "nis", np.nan))
+            nis_alarm = bool(
+                getattr(integrity, "is_suspect", False) or getattr(integrity, "is_invalid", False)
+            )
+            integrity_p_value = float(getattr(integrity, "p_value", np.nan))
+            integrity_excluded_sv_ids_count = len(getattr(integrity, "excluded_sv_ids", []))
+
+            applied_count = getattr(attack_report, "applied_count", 0)
+            attack_active = applied_count > 0
+            if applied_count:
+                attack_pr_bias_mean_m = attack_report.pr_bias_sum_m / applied_count
+                attack_prr_bias_mean_mps = attack_report.prr_bias_sum_mps / applied_count
             else:
-                time.sleep(0.05)
+                attack_pr_bias_mean_m = 0.0
+                attack_prr_bias_mean_mps = 0.0
 
-        if controller.quit_requested:
-            break
+            conops_status = getattr(getattr(conops, "status", None), "value", "-")
+            conops_mode5 = getattr(getattr(conops, "mode5", None), "value", "-")
 
-        controller.step_once = False
-        step = engine.step(float(t_s))
-        sol = step.get("sol")
-        integrity = step.get("integrity")
-        conops = step.get("conops")
-        attack_report = step.get("attack_report")
-
-        fix_flags = getattr(sol, "fix_flags", None)
-        dop = getattr(sol, "dop", None)
-        residuals = getattr(sol, "residuals", None)
-
-        fix_type = getattr(fix_flags, "fix_type", "NO FIX")
-        sats_used = int(getattr(fix_flags, "sv_count", 0) or 0)
-        pdop = float(getattr(dop, "pdop", np.nan))
-        residual_rms_m = float(getattr(residuals, "rms_m", np.nan))
-        clk_bias_s = float(getattr(sol, "clk_bias_s", np.nan))
-        nis_alarm = bool(
-            getattr(integrity, "is_suspect", False) or getattr(integrity, "is_invalid", False)
-        )
-
-        applied_count = getattr(attack_report, "applied_count", 0)
-        attack_active = applied_count > 0
-        if applied_count:
-            attack_pr_bias_mean_m = attack_report.pr_bias_sum_m / applied_count
-        else:
-            attack_pr_bias_mean_m = 0.0
-
-        conops_status = getattr(getattr(conops, "status", None), "value", "-")
-        conops_mode5 = getattr(getattr(conops, "mode5", None), "value", "-")
-
-        print(
-            f"t={t_s:6.1f}s fix_type={fix_type:6s} sats_used={sats_used:2d} pdop={pdop:6.2f} "
-            f"residual_rms_m={residual_rms_m:7.3f} nis_alarm={int(nis_alarm)} "
-            f"conops_status={conops_status} conops_mode5={conops_mode5} "
-            f"attack_active={int(attack_active)}"
-        )
-
-        if plotter is not None:
-            plotter.update(
-                float(t_s),
-                float(residual_rms_m),
-                float(pdop),
-                float(clk_bias_s),
-                float(attack_pr_bias_mean_m if attack_active else 0.0),
+            print(
+                f"t={t_s:6.1f}s fix_type={fix_type:6s} sats_used={sats_used:2d} pdop={pdop:6.2f} "
+                f"residual_rms_m={residual_rms_m:7.3f} nis_alarm={int(nis_alarm)} "
+                f"conops_status={conops_status} conops_mode5={conops_mode5} "
+                f"attack_active={int(attack_active)}"
             )
 
-        target_wall_dt = dt / max(args.speed, 1e-9)
-        elapsed = time.perf_counter() - last_tick
-        if elapsed < target_wall_dt:
-            time.sleep(target_wall_dt - elapsed)
-        last_tick = time.perf_counter()
+            if jsonl_fp is not None:
+                json_record = {
+                    "t_s": _json_safe_number(float(t_s)),
+                    "fix_valid": fix_valid,
+                    "fix_type": fix_type,
+                    "sats_used": sats_used,
+                    "pdop": _json_safe_number(pdop),
+                    "residual_rms_m": _json_safe_number(residual_rms_m),
+                    "clk_bias_s": _json_safe_number(clk_bias_s),
+                    "clk_drift_sps": _json_safe_number(clk_drift_sps),
+                    "nis": _json_safe_number(nis),
+                    "nis_alarm": nis_alarm,
+                    "conops_status": conops_status,
+                    "conops_mode5": conops_mode5,
+                    "integrity_p_value": _json_safe_number(integrity_p_value),
+                    "integrity_excluded_sv_ids_count": integrity_excluded_sv_ids_count,
+                    "attack_name": cfg.attack_name,
+                    "attack_active": attack_active,
+                    "attack_pr_bias_mean_m": _json_safe_number(float(attack_pr_bias_mean_m)),
+                    "attack_prr_bias_mean_mps": _json_safe_number(float(attack_prr_bias_mean_mps)),
+                }
+                jsonl_fp.write(json.dumps(json_record) + "\n")
+                jsonl_fp.flush()
+
+            if plotter is not None:
+                plotter.update(
+                    float(t_s),
+                    float(residual_rms_m),
+                    float(pdop),
+                    float(clk_bias_s),
+                    float(attack_pr_bias_mean_m if attack_active else 0.0),
+                )
+
+            target_wall_dt = dt / max(args.speed, 1e-9)
+            elapsed = time.perf_counter() - last_tick
+            if elapsed < target_wall_dt:
+                time.sleep(target_wall_dt - elapsed)
+            last_tick = time.perf_counter()
+    finally:
+        if jsonl_fp is not None:
+            jsonl_fp.close()
 
     if plotter is not None:
         plt.ioff()
