@@ -116,13 +116,13 @@ class _DemoSolver:
         return solution
 
 
-def run_static_demo(cfg: SimConfig, run_dir: Path, save_figs: bool = True) -> Path:
+def build_engine(cfg: SimConfig) -> tuple[SimulationEngine, ReceiverTruth, RaimIntegrityChecker]:
+    """Build the standard demo simulation engine pipeline."""
     seed = int(cfg.rng_seed)
     np.random.seed(seed)
     random.seed(seed)
     rng = np.random.default_rng(seed)
-    receiver_lla = (37.4275, -122.1697, 30.0)
-    receiver_truth = lla_to_ecef(*receiver_lla)
+    receiver_truth = lla_to_ecef(37.4275, -122.1697, 30.0)
     receiver_clock = 4.2e-6
     receiver_truth_state = ReceiverTruth(
         pos_ecef_m=receiver_truth,
@@ -153,6 +153,18 @@ def run_static_demo(cfg: SimConfig, run_dir: Path, save_figs: bool = True) -> Pa
         attack_pipeline,
         conops_sm,
     )
+    return engine, receiver_truth_state, integrity_checker
+
+
+def run_static_demo(cfg: SimConfig, run_dir: Path, save_figs: bool = True) -> Path:
+    engine, receiver_truth_state, integrity_checker = build_engine(cfg)
+    seed = int(cfg.rng_seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    receiver_truth = receiver_truth_state.pos_ecef_m
+    receiver_clock = receiver_truth_state.clk_bias_s
+    measurement_source = engine.meas_src
+    constellation = measurement_source.constellation
     dummy_meas = GnssMeasurement(
         sv_id="G01",
         t=0.0,
@@ -223,6 +235,7 @@ def run_static_demo(cfg: SimConfig, run_dir: Path, save_figs: bool = True) -> Pa
 
     epochs = []
     times = np.arange(0.0, cfg.duration, cfg.dt)
+    attack_name = cfg.attack_name or "none"
     for t in times:
         step = engine.step(float(t))
         sol = step["sol"]
