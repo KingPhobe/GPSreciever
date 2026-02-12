@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import random
 import time
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -21,7 +22,34 @@ from gnss_twin.runtime import (
 )
 from gnss_twin.sat.simple_gps import SimpleGpsConfig, SimpleGpsConstellation
 from gnss_twin.utils.wgs84 import lla_to_ecef
-from sim.run_static_demo import _DemoSolver, _parse_attack_params
+from sim.run_static_demo import _DemoSolver
+
+
+def parse_kv_list(raw_params: list[str]) -> dict[str, Any]:
+    """Parse repeated key=value arguments into typed values."""
+    params: dict[str, Any] = {}
+    for raw_param in raw_params:
+        if "=" not in raw_param:
+            raise ValueError(f"Invalid --attack-param '{raw_param}'; expected key=value.")
+        key, raw_value = raw_param.split("=", 1)
+        if not key:
+            raise ValueError("Attack parameter key cannot be empty.")
+        params[key] = _coerce_kv_value(raw_value)
+    return params
+
+
+def _coerce_kv_value(raw_value: str) -> Any:
+    value_lower = raw_value.lower()
+    if value_lower in {"true", "false"}:
+        return value_lower == "true"
+    try:
+        return int(raw_value)
+    except ValueError:
+        pass
+    try:
+        return float(raw_value)
+    except ValueError:
+        return raw_value
 
 
 class _LiveController:
@@ -142,9 +170,13 @@ def _build_engine(cfg: SimConfig) -> SimulationEngine:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run interactive live GNSS twin simulation.")
-    dt_default = getattr(SimConfig, "dt", 1.0)
     parser.add_argument("--duration-s", type=float, default=60.0, help="Duration in seconds.")
-    parser.add_argument("--dt", type=float, default=dt_default, help="Simulation step size in seconds.")
+    parser.add_argument(
+        "--dt",
+        type=float,
+        default=None,
+        help="Simulation step size in seconds (defaults to cfg.dt_s/cfg.dt/1.0).",
+    )
     parser.add_argument("--use-ekf", action="store_true", help="Enable EKF navigation filter.")
     parser.add_argument("--rng-seed", type=int, default=42, help="Random seed for simulation.")
     parser.add_argument(
@@ -172,15 +204,16 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    attack_params = _parse_attack_params(args.attack_param, args.attack_name)
+    attack_params = parse_kv_list(args.attack_param)
     cfg = SimConfig(
         duration=args.duration_s,
-        dt=args.dt,
+        dt=args.dt if args.dt is not None else 1.0,
         use_ekf=args.use_ekf,
         attack_name=args.attack_name,
         attack_params=attack_params,
         rng_seed=args.rng_seed,
     )
+    dt = args.dt if args.dt is not None else float(getattr(cfg, "dt_s", getattr(cfg, "dt", 1.0)))
 
     engine = _build_engine(cfg)
     controller = _LiveController()
@@ -190,7 +223,7 @@ def main() -> None:
         plotter = _LivePlotter(max_points=300)
         plotter.fig.canvas.mpl_connect("key_press_event", controller.on_key)
 
-    sim_times = np.arange(0.0, cfg.duration + 1e-9, cfg.dt)
+    sim_times = np.arange(0.0, cfg.duration + 1e-9, dt)
     last_tick = time.perf_counter()
 
     for t_s in sim_times:
@@ -208,16 +241,23 @@ def main() -> None:
 
         controller.step_once = False
         step = engine.step(float(t_s))
-        sol = step["sol"]
-        integrity = step["integrity"]
+        sol = step.get("sol")
+        integrity = step.get("integrity")
         conops = step.get("conops")
         attack_report = step.get("attack_report")
 
-        fix_type = sol.fix_flags.fix_type if sol is not None else "NO FIX"
-        sats_used = sol.fix_flags.sv_count if sol is not None else 0
-        pdop = sol.dop.pdop if sol is not None else float("nan")
-        residual_rms_m = sol.residuals.rms_m if sol is not None else float("nan")
-        clk_bias_s = sol.clk_bias_s if sol is not None else float("nan")
+        fix_flags = getattr(sol, "fix_flags", None)
+        dop = getattr(sol, "dop", None)
+        residuals = getattr(sol, "residuals", None)
+
+        fix_type = getattr(fix_flags, "fix_type", "NO FIX")
+        sats_used = int(getattr(fix_flags, "sv_count", 0) or 0)
+        pdop = float(getattr(dop, "pdop", np.nan))
+        residual_rms_m = float(getattr(residuals, "rms_m", np.nan))
+        clk_bias_s = float(getattr(sol, "clk_bias_s", np.nan))
+        nis_alarm = bool(
+            getattr(integrity, "is_suspect", False) or getattr(integrity, "is_invalid", False)
+        )
 
         applied_count = getattr(attack_report, "applied_count", 0)
         attack_active = applied_count > 0
@@ -226,13 +266,14 @@ def main() -> None:
         else:
             attack_pr_bias_mean_m = 0.0
 
-        conops_status = conops.status.value if conops is not None else "-"
-        conops_mode5 = conops.mode5.value if conops is not None else "-"
+        conops_status = getattr(getattr(conops, "status", None), "value", "-")
+        conops_mode5 = getattr(getattr(conops, "mode5", None), "value", "-")
 
         print(
-            f"t={t_s:6.1f}s fix={fix_type:6s} sats={sats_used:2d} pdop={pdop:5.2f} "
-            f"resid={residual_rms_m:6.2f}m int=(sus={int(integrity.is_suspect)} inv={int(integrity.is_invalid)}) "
-            f"conops={conops_status}/{conops_mode5} attack={int(attack_active)}"
+            f"t={t_s:6.1f}s fix_type={fix_type:6s} sats_used={sats_used:2d} pdop={pdop:6.2f} "
+            f"residual_rms_m={residual_rms_m:7.3f} nis_alarm={int(nis_alarm)} "
+            f"conops_status={conops_status} conops_mode5={conops_mode5} "
+            f"attack_active={int(attack_active)}"
         )
 
         if plotter is not None:
@@ -244,7 +285,7 @@ def main() -> None:
                 float(attack_pr_bias_mean_m if attack_active else 0.0),
             )
 
-        target_wall_dt = cfg.dt / max(args.speed, 1e-6)
+        target_wall_dt = dt / max(args.speed, 1e-9)
         elapsed = time.perf_counter() - last_tick
         if elapsed < target_wall_dt:
             time.sleep(target_wall_dt - elapsed)
