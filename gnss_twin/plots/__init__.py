@@ -45,6 +45,7 @@ def plot_update(
     plot_dop(data, output_dir / "dop.png")
     plot_sv_used(data, output_dir / "satellites_used.png")
     plot_fix_status(data, output_dir / "fix_status.png")
+    plot_attack_telemetry(data, output_dir / "attack_telemetry.png")
     return output_dir
 
 
@@ -95,6 +96,27 @@ def plot_fix_status(data: Any, path: str | Path) -> None:
     _plot_fix_status(times, fix_type, fix_valid, Path(path))
 
 
+
+
+def plot_attack_telemetry(data: Any, path: str | Path) -> None:
+    times = _series_or_nan(data, "t_s")
+    attack_active = _series_or_nan(data, "attack_active")
+    pr_bias = _series_or_nan(data, "attack_pr_bias_mean_m")
+    prr_bias = _series_or_nan(data, "attack_prr_bias_mean_mps")
+
+    fig, ax = plt.subplots(figsize=(9, 4))
+    ax.step(times, attack_active, where="post", label="Attack active (0/1)", color="tab:red")
+    ax.plot(times, pr_bias, label="PR bias mean (m)", color="tab:blue")
+    ax.plot(times, prr_bias, label="PRR bias mean (m/s)", color="tab:green")
+    ax.set_title("Attack Telemetry vs Time")
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Telemetry")
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="best")
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+
 def epochs_to_frame(epochs: list[EpochLog]) -> Any:
     """Build a DataFrame from EpochLog entries for GUI plotting."""
 
@@ -118,6 +140,10 @@ def epochs_to_frame(epochs: list[EpochLog]) -> Any:
                 "sats_used": _sv_used(epoch),
                 "fix_type": _fix_type_value(epoch),
                 "fix_valid": _fix_valid_value(epoch),
+                "attack_name": epoch.attack_name or "",
+                "attack_active": bool(epoch.attack_active),
+                "attack_pr_bias_mean_m": float(epoch.attack_pr_bias_mean_m),
+                "attack_prr_bias_mean_mps": float(epoch.attack_prr_bias_mean_mps),
                 "pos_ecef_x": solution.pos_ecef[0] if solution is not None else float("nan"),
                 "pos_ecef_y": solution.pos_ecef[1] if solution is not None else float("nan"),
                 "pos_ecef_z": solution.pos_ecef[2] if solution is not None else float("nan"),

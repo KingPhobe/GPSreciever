@@ -16,6 +16,7 @@ class SpoofClockRampAttack:
     """Apply a coherent clock pull-off ramp to all pseudoranges."""
 
     start_t: float = 20.0
+    end_t: float | None = None
     ramp_rate_mps: float = 1.0
 
     def reset(self, seed: int | None = None) -> None:
@@ -29,6 +30,8 @@ class SpoofClockRampAttack:
         rx_truth: "ReceiverTruth",
     ) -> tuple["GnssMeasurement", AttackDelta]:
         if meas.t < self.start_t:
+            return meas, AttackDelta(applied=False)
+        if self.end_t is not None and meas.t > self.end_t:
             return meas, AttackDelta(applied=False)
         bias_m = (meas.t - self.start_t) * self.ramp_rate_mps
         prr_mps = (
@@ -45,6 +48,7 @@ class SpoofPrRampAttack:
     """Apply a ramped pseudorange bias to a specific satellite."""
 
     start_t: float = 20.0
+    end_t: float | None = None
     ramp_rate_mps: float = 1.0
     target_sv: str = ""
 
@@ -61,6 +65,8 @@ class SpoofPrRampAttack:
         if meas.sv_id != self.target_sv:
             return meas, AttackDelta(applied=False)
         if meas.t < self.start_t:
+            return meas, AttackDelta(applied=False)
+        if self.end_t is not None and meas.t > self.end_t:
             return meas, AttackDelta(applied=False)
         bias_m = (meas.t - self.start_t) * self.ramp_rate_mps
         prr_mps = (

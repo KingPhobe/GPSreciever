@@ -204,7 +204,7 @@ class MainWindow(QMainWindow):
             attack_params = {
                 "target_sv": self.target_sv_input.text().strip(),
                 "start_t": float(self.start_t_input.value()),
-                "slope_mps": float(self.slope_mps_input.value()),
+                "ramp_rate_mps": float(self.slope_mps_input.value()),
             }
         return SimConfig(
             duration=float(self.duration_s_input.value()),

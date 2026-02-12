@@ -40,6 +40,7 @@ def create_attack(name: str, params: dict) -> AttackModel:
     if lowered == "spoof_clock_ramp":
         return SpoofClockRampAttack(
             start_t=float(params.get("start_t", 20.0)),
+            end_t=(float(params["end_t"]) if "end_t" in params else None),
             ramp_rate_mps=float(params.get("ramp_rate_mps", 1.0)),
         )
     if lowered == "spoof_pr_ramp":
@@ -48,6 +49,7 @@ def create_attack(name: str, params: dict) -> AttackModel:
             raise ValueError("spoof_pr_ramp requires target_sv to be provided")
         return SpoofPrRampAttack(
             start_t=float(params.get("start_t", 20.0)),
+            end_t=(float(params["end_t"]) if "end_t" in params else None),
             ramp_rate_mps=float(params.get("ramp_rate_mps", 1.0)),
             target_sv=target_sv,
         )
