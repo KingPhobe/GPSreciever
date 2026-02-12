@@ -157,7 +157,7 @@ def main() -> None:
     )
     dt = args.dt if args.dt is not None else float(getattr(cfg, "dt_s", getattr(cfg, "dt", 1.0)))
 
-    engine, _, _ = build_engine(cfg)
+    engine = build_engine(cfg)
     controller = _LiveController()
     plotter: _LivePlotter | None = None
     if not args.no_plots:
