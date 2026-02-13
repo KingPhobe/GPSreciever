@@ -28,6 +28,11 @@ class AttackPipeline:
         report = AttackReport()
         if not self.attacks:
             return list(measurements), report
+        visible_sv_ids = [meas.sv_id for meas in measurements]
+        for attack in self.attacks:
+            set_visible_sv_ids = getattr(attack, "set_visible_sv_ids", None)
+            if callable(set_visible_sv_ids):
+                set_visible_sv_ids(visible_sv_ids)
         sv_by_id = {state.sv_id: state for state in sv_states}
         attacked: list[GnssMeasurement] = []
         for meas in measurements:

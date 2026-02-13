@@ -1,6 +1,8 @@
 import numpy as np
 
-from gnss_twin.attacks import SpoofClockRampAttack, SpoofPrRampAttack, create_attack
+import warnings
+
+from gnss_twin.attacks import AttackPipeline, SpoofClockRampAttack, SpoofPrRampAttack, create_attack
 from gnss_twin.models import GnssMeasurement, ReceiverTruth, SvState
 
 
@@ -156,3 +158,63 @@ def test_create_attack_accepts_optional_end_t() -> None:
     )
     assert isinstance(pr_attack, SpoofPrRampAttack)
     assert pr_attack.end_t == 20.0
+
+
+def test_create_attack_accepts_sv_resolution_flags() -> None:
+    attack = create_attack(
+        "spoof_pr_ramp",
+        {
+            "target_sv": "G02",
+            "auto_select_visible_sv": True,
+            "strict_target_sv": False,
+        },
+    )
+    assert isinstance(attack, SpoofPrRampAttack)
+    assert attack.auto_select_visible_sv is True
+    assert attack.strict_target_sv is False
+
+
+def test_spoof_pr_ramp_warns_once_when_target_not_visible_strict() -> None:
+    attack = SpoofPrRampAttack(start_t=1.0, ramp_rate_mps=5.0, target_sv="G99", strict_target_sv=True)
+    pipeline = AttackPipeline(attacks=[attack])
+    rx_truth = _make_rx_truth()
+    measurements = [
+        _make_measurement(sv_id="G01", t=2.0, pr_m=1_000.0, prr_mps=0.0),
+        _make_measurement(sv_id="G02", t=2.0, pr_m=1_001.0, prr_mps=0.0),
+    ]
+    sv_states = [_make_sv_state("G01", 2.0), _make_sv_state("G02", 2.0)]
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        attacked_1, report_1 = pipeline.apply(measurements, sv_states, rx_truth=rx_truth)
+        attacked_2, report_2 = pipeline.apply(measurements, sv_states, rx_truth=rx_truth)
+
+    assert attacked_1 == measurements
+    assert attacked_2 == measurements
+    assert report_1.applied_count == 0
+    assert report_2.applied_count == 0
+    assert len(caught) == 1
+    assert "not visible" in str(caught[0].message)
+
+
+def test_spoof_pr_ramp_auto_selects_visible_sv_and_applies() -> None:
+    attack = SpoofPrRampAttack(
+        start_t=1.0,
+        ramp_rate_mps=2.0,
+        target_sv="G99",
+        auto_select_visible_sv=True,
+    )
+    pipeline = AttackPipeline(attacks=[attack])
+    rx_truth = _make_rx_truth()
+    measurements = [
+        _make_measurement(sv_id="G03", t=3.0, pr_m=1_200.0, prr_mps=1.0),
+        _make_measurement(sv_id="G01", t=3.0, pr_m=1_100.0, prr_mps=1.0),
+    ]
+    sv_states = [_make_sv_state("G01", 3.0), _make_sv_state("G03", 3.0)]
+
+    attacked, report = pipeline.apply(measurements, sv_states, rx_truth=rx_truth)
+
+    assert report.applied_count > 0
+    assert attacked[1].sv_id == "G01"
+    assert attacked[1].pr_m == 1_100.0 + (3.0 - 1.0) * 2.0
+    assert attacked[1].prr_mps == 1.0 + 2.0

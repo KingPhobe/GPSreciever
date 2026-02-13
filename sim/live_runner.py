@@ -178,6 +178,7 @@ def main() -> None:
 
     sim_times = np.arange(0.0, args.duration_s + 1e-9, dt)
     target_wall_dt = dt / max(args.speed, 1e-9)
+    any_attack_applied = False
 
     try:
         for t_s in sim_times:
@@ -223,6 +224,7 @@ def main() -> None:
 
             applied_count = int(getattr(attack_report, "applied_count", 0) or 0)
             attack_active = applied_count > 0
+            any_attack_applied = any_attack_applied or attack_active
             if attack_active:
                 attack_pr_bias_mean_m = _as_float(getattr(attack_report, "pr_bias_sum_m", 0.0)) / applied_count
                 attack_prr_bias_mean_mps = _as_float(getattr(attack_report, "prr_bias_sum_mps", 0.0)) / applied_count
@@ -285,6 +287,9 @@ def main() -> None:
             elapsed = time.perf_counter() - epoch_start
             if elapsed < target_wall_dt:
                 time.sleep(target_wall_dt - elapsed)
+
+        if args.attack_name.lower() != "none" and not any_attack_applied:
+            print("Attack configured but never applied (check target_sv visibility).")
     finally:
         if out_fp is not None:
             out_fp.close()

@@ -60,7 +60,17 @@ def create_attack(name: str, params: dict) -> AttackModel:
             ramp_rate_mps=ramp_rate_mps,
         )
     if lowered == "spoof_pr_ramp":
-        unknown = set(params) - {"start_t", "end_t", "ramp_rate_mps", "target_sv", "slope_mps", "slope", "t_end"}
+        unknown = set(params) - {
+            "start_t",
+            "end_t",
+            "ramp_rate_mps",
+            "target_sv",
+            "slope_mps",
+            "slope",
+            "t_end",
+            "auto_select_visible_sv",
+            "strict_target_sv",
+        }
         if unknown:
             warnings.warn(
                 f"Unknown spoof_pr_ramp attack params: {sorted(unknown)}",
@@ -83,6 +93,8 @@ def create_attack(name: str, params: dict) -> AttackModel:
             end_t=(float(end_t) if end_t is not None else None),
             ramp_rate_mps=ramp_rate_mps,
             target_sv=target_sv,
+            auto_select_visible_sv=bool(params.get("auto_select_visible_sv", False)),
+            strict_target_sv=bool(params.get("strict_target_sv", True)),
         )
     if lowered == "jam_cn0_drop":
         unknown = set(params) - {"start_t", "cn0_drop_db", "sigma_pr_scale", "sigma_prr_scale"}
