@@ -74,6 +74,7 @@ def integrity_pvt(
     initial_clk_bias_s: float = 0.0,
     config: IntegrityConfig | None = None,
     tracker: SvTracker | None = None,
+    precomputed: WlsPvtResult | None = None,
 ) -> tuple[PvtSolution, Mapping[str, Mapping[str, float]]]:
     """Solve for PVT and attach integrity flags and per-SV metadata."""
 
@@ -103,7 +104,35 @@ def integrity_pvt(
     raim_dof = 0
     raim_threshold = float("inf")
     raim_passed = False
-    for iteration in range(cfg.max_fde_iterations + 1):
+    iteration = 0
+    should_solve = True
+    if _matches_used_set(precomputed, used):
+        should_solve = False
+        solution = precomputed
+        residuals_by_sv = solution.residuals_m
+        if not residuals_by_sv:
+            raim_passed = True
+        else:
+            sigmas_by_sv = {meas.sv_id: meas.sigma_pr_m for meas in used}
+            raim_stat, raim_dof, raim_threshold, raim_passed = compute_raim(
+                residuals_by_sv,
+                sigmas_by_sv,
+                num_states=4,
+                alpha=cfg.chi_square_alpha,
+            )
+        if not raim_passed and iteration < cfg.max_fde_iterations:
+            worst_sv, _ = max(
+                residuals_by_sv.items(),
+                key=lambda item: abs(item[1])
+                / max(float(sigmas_by_sv.get(item[0], 0.0)), 1e-3),
+            )
+            rejected.append(worst_sv)
+            used = [meas for meas in used if meas.sv_id != worst_sv]
+            if len(used) < 4:
+                return _no_fix_solution(len(measurements), mask_ok, "insufficient_sv_after_fde"), per_sv_stats
+            iteration += 1
+            should_solve = True
+    while should_solve:
         solution = wls_pvt(
             used,
             sv_states,
@@ -134,6 +163,7 @@ def integrity_pvt(
         used = [meas for meas in used if meas.sv_id != worst_sv]
         if len(used) < 4:
             return _no_fix_solution(len(measurements), mask_ok, "insufficient_sv_after_fde"), per_sv_stats
+        iteration += 1
 
     residual_stats = _compute_residual_stats(used, residuals_by_sv)
     chi_square_threshold = raim_threshold if np.isfinite(raim_threshold) else _chi_square_threshold(
@@ -277,3 +307,10 @@ def _fix_type(num_used: int, dop: DopMetrics, cfg: IntegrityConfig) -> str:
     if not np.isfinite(dop.vdop) or dop.vdop > cfg.vdop_max:
         return "2D"
     return "3D"
+
+
+def _matches_used_set(precomputed: WlsPvtResult | None, used: list[GnssMeasurement]) -> bool:
+    if precomputed is None:
+        return False
+    used_sv_ids = {meas.sv_id for meas in used}
+    return bool(used_sv_ids) and set(precomputed.residuals_m) == used_sv_ids
