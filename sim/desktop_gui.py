@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import sys
 import time
-from datetime import datetime
+import csv
+from collections import deque
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import re
 
@@ -25,6 +27,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QPlainTextEdit,
     QTabWidget,
     QSpinBox,
     QDoubleSpinBox,
@@ -34,15 +37,19 @@ from PyQt6.QtWidgets import (
 
 from gnss_twin.config import SimConfig
 from gnss_twin.models import EpochLog, ReceiverTruth
+from gnss_twin.nmea.neo_m8n_output import NeoM8nNmeaOutput
 from gnss_twin.plots import epochs_to_frame, plot_update
 from gnss_twin.sat.simple_gps import SimpleGpsConfig, SimpleGpsConstellation
 from gnss_twin.utils.angles import elev_az_from_rx_sv
+from gnss_twin.utils.wgs84 import ecef_to_lla
 from sim.run_static_demo import build_engine_with_truth, build_epoch_log
 
 
 RESID_RMS_OK_M = 10.0
 PDOP_OK = 6.0
 DIAG_UPDATE_PERIOD_S = 0.3
+NMEA_PREVIEW_UPDATE_PERIOD_S = 0.2
+NMEA_PREVIEW_LINES = 10
 
 
 def _date_folder_str() -> str:
@@ -215,6 +222,12 @@ class MainWindow(QMainWindow):
         self.attack_config_ok = True
         self.attack_config_msg = ""
         self.attack_never_applied_warned = False
+        self.nmea_enabled = True
+        self.nmea = NeoM8nNmeaOutput(rate_hz=1.0, talker="GN")
+        self.nmea_t0_utc = datetime.now(timezone.utc)
+        self.nmea_buffer: list[str] = []
+        self.nmea_recent: deque[str] = deque(maxlen=200)
+        self.last_nmea_preview_update_walltime = 0.0
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.step_once)
@@ -318,6 +331,10 @@ class MainWindow(QMainWindow):
         form.addRow("speed", self.speed_input)
         form.addRow("rng_seed", self.rng_seed_input)
         form.addRow("use_ekf", self.use_ekf_input)
+        self.nmea_enable_checkbox = QCheckBox("Enable NMEA (NEO-M8N: GGA+RMC @1Hz)")
+        self.nmea_enable_checkbox.setChecked(True)
+        self.nmea_enable_checkbox.toggled.connect(self._on_nmea_toggled)
+        form.addRow("nmea", self.nmea_enable_checkbox)
         form.addRow("attack preset", self.attack_preset_input)
         form.addRow("run name", self.run_name_input)
         form.addRow(self.target_sv_label, target_sv_widget)
@@ -393,7 +410,17 @@ class MainWindow(QMainWindow):
 
         self.figure.tight_layout()
         layout.addWidget(self.canvas)
+
+        self.nmea_preview = QPlainTextEdit()
+        self.nmea_preview.setReadOnly(True)
+        self.nmea_preview.setPlaceholderText("NMEA preview appears here while running.")
+        self.nmea_preview.setMaximumBlockCount(200)
+        layout.addWidget(QLabel("Live NMEA Preview"))
+        layout.addWidget(self.nmea_preview)
         return box
+
+    def _on_nmea_toggled(self, checked: bool) -> None:
+        self.nmea_enabled = bool(checked)
 
     def _update_attack_controls(self) -> None:
         attack_name = self.attack_preset_input.currentText()
@@ -497,6 +524,12 @@ class MainWindow(QMainWindow):
         self.t_s_current = 0.0
         self.epochs = []
         self.frame = pd.DataFrame()
+        self.nmea.reset()
+        self.nmea_t0_utc = datetime.now(timezone.utc)
+        self.nmea_buffer.clear()
+        self.nmea_recent.clear()
+        self.last_nmea_preview_update_walltime = 0.0
+        self.nmea_preview.clear()
         self.attack_never_applied_warned = False
         self._refresh_flags_plot()
         if self.diagnostics_window is not None:
@@ -513,6 +546,12 @@ class MainWindow(QMainWindow):
             self.initialize_reset()
         if self.engine is None:
             return
+        if not self.epochs and self.t_s_current == 0.0:
+            self.nmea.reset()
+            self.nmea_t0_utc = datetime.now(timezone.utc)
+            self.nmea_buffer.clear()
+            self.nmea_recent.clear()
+            self._maybe_update_nmea_preview(force=True)
         self.is_running = True
         self.timer.start(self._compute_timer_ms())
 
@@ -538,15 +577,55 @@ class MainWindow(QMainWindow):
         )
         self.epochs.append(epoch)
         self.frame = epochs_to_frame(self.epochs)
+        self._step_nmea(float(self.t_s_current), epoch, step_out)
 
         self.t_s_current += float(self.cfg.dt)
         self._update_status_labels(epoch)
         self._refresh_flags_plot()
         self._maybe_update_diagnostics()
+        self._maybe_update_nmea_preview()
 
         if self.t_s_current >= float(self.cfg.duration):
             self.stop_run()
             self._warn_if_attack_never_applied()
+
+    def _step_nmea(self, t_s: float, epoch: EpochLog, step_out: dict) -> None:
+        if not self.nmea_enabled:
+            return
+        sol = step_out.get("sol")
+        if sol is None:
+            return
+        lat_deg, lon_deg, alt_m = ecef_to_lla(*sol.pos_ecef)
+        valid = bool(epoch.fix_valid)
+        num_sats = int(epoch.sats_used or 0)
+        hdop = epoch.hdop
+        if hdop is None and epoch.pdop is not None:
+            hdop = float(epoch.pdop)
+        elif hdop is None:
+            hdop = float("nan")
+        t_utc = self.nmea_t0_utc + timedelta(seconds=t_s)
+        lines = self.nmea.step(
+            t_s,
+            t_utc=t_utc,
+            lat_deg=lat_deg,
+            lon_deg=lon_deg,
+            alt_m=alt_m,
+            valid=valid,
+            num_sats=num_sats,
+            hdop=float(hdop),
+        )
+        if not lines:
+            return
+        self.nmea_buffer.extend(lines)
+        self.nmea_recent.extend(lines)
+
+    def _maybe_update_nmea_preview(self, force: bool = False) -> None:
+        now = time.monotonic()
+        if not force and now - self.last_nmea_preview_update_walltime < NMEA_PREVIEW_UPDATE_PERIOD_S:
+            return
+        self.last_nmea_preview_update_walltime = now
+        recent_lines = list(self.nmea_recent)[-NMEA_PREVIEW_LINES:]
+        self.nmea_preview.setPlainText("".join(recent_lines))
 
     def _update_status_labels(self, epoch: EpochLog | None = None) -> None:
         values = {
@@ -659,6 +738,33 @@ class MainWindow(QMainWindow):
         self.frame = df
         df.to_csv(run_dir / "run_table.csv", index=False)
         plot_update(df, out_dir=run_dir, run_name=None)
+        (run_dir / "nmea_output.nmea").write_text("".join(self.nmea_buffer), encoding="utf-8")
+        with (run_dir / "run_metadata.csv").open("w", encoding="utf-8", newline="") as metadata_file:
+            writer = csv.DictWriter(
+                metadata_file,
+                fieldnames=[
+                    "rx_lat_deg",
+                    "rx_lon_deg",
+                    "rx_alt_m",
+                    "nmea_profile",
+                    "nmea_rate_hz",
+                    "nmea_msgs",
+                    "nmea_talker",
+                ],
+            )
+            writer.writeheader()
+            cfg = self.cfg or SimConfig()
+            writer.writerow(
+                {
+                    "rx_lat_deg": cfg.rx_lat_deg,
+                    "rx_lon_deg": cfg.rx_lon_deg,
+                    "rx_alt_m": cfg.rx_alt_m,
+                    "nmea_profile": "NEO-M8N",
+                    "nmea_rate_hz": 1.0,
+                    "nmea_msgs": "GGA,RMC",
+                    "nmea_talker": "GN",
+                }
+            )
         self._warn_if_attack_never_applied()
 
         QMessageBox.information(self, "Saved", f"Saved to: {run_dir}")
