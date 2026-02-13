@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import random
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
@@ -24,6 +25,7 @@ from gnss_twin.models import (
     fix_type_from_label,
 )
 from gnss_twin.meas.pseudorange import SyntheticMeasurementSource
+from gnss_twin.nmea.neo_m8n_output import NeoM8nNmeaOutput
 from gnss_twin.integrity.flags import IntegrityConfig, SvTracker, integrity_pvt
 from gnss_twin.receiver.ekf_nav import EkfNav
 from gnss_twin.receiver.gating import postfit_gate
@@ -122,7 +124,7 @@ def build_engine_with_truth(cfg: SimConfig) -> tuple[SimulationEngine, ReceiverT
     np.random.seed(seed)
     random.seed(seed)
     rng = np.random.default_rng(seed)
-    receiver_truth = lla_to_ecef(37.4275, -122.1697, 30.0)
+    receiver_truth = lla_to_ecef(cfg.rx_lat_deg, cfg.rx_lon_deg, cfg.rx_alt_m)
     receiver_clock = 4.2e-6
     receiver_truth_state = ReceiverTruth(
         pos_ecef_m=receiver_truth,
@@ -297,6 +299,9 @@ def run_static_demo(cfg: SimConfig, run_dir: Path, save_figs: bool = True) -> Pa
         print(f"{len(visible)} visible satellites at t={t}s")
 
     epochs = []
+    nmea = NeoM8nNmeaOutput(rate_hz=1.0, talker="GN")
+    nmea_lines: list[str] = []
+    t0_utc = datetime.now(timezone.utc)
     times = np.arange(0.0, cfg.duration, cfg.dt)
     attack_name = cfg.attack_name or "none"
     for t in times:
@@ -309,6 +314,28 @@ def run_static_demo(cfg: SimConfig, run_dir: Path, save_figs: bool = True) -> Pa
             attack_name=attack_name,
         )
         epochs.append(epoch_log)
+        sol = step.get("sol")
+        if sol is not None:
+            lat_deg, lon_deg, alt_m = ecef_to_lla(*sol.pos_ecef)
+            valid = bool(epoch_log.fix_valid)
+            num_sats = int(epoch_log.sats_used or 0)
+            hdop = epoch_log.hdop
+            if hdop is None and epoch_log.pdop is not None:
+                hdop = float(epoch_log.pdop)
+            elif hdop is None:
+                hdop = float("nan")
+            t_utc = t0_utc + timedelta(seconds=float(t))
+            lines = nmea.step(
+                float(t),
+                t_utc=t_utc,
+                lat_deg=lat_deg,
+                lon_deg=lon_deg,
+                alt_m=alt_m,
+                valid=valid,
+                num_sats=num_sats,
+                hdop=float(hdop),
+            )
+            nmea_lines.extend(lines)
 
     run_dir.mkdir(parents=True, exist_ok=True)
     if save_figs:
@@ -321,6 +348,32 @@ def run_static_demo(cfg: SimConfig, run_dir: Path, save_figs: bool = True) -> Pa
         output_dir = run_dir
     save_epochs_npz(output_dir / "epoch_logs.npz", epochs)
     save_epochs_csv(output_dir / "epoch_logs.csv", epochs)
+    (output_dir / "nmea_output.nmea").write_text("".join(nmea_lines), encoding="utf-8")
+    with (output_dir / "run_metadata.csv").open("w", encoding="utf-8", newline="") as metadata_file:
+        writer = csv.DictWriter(
+            metadata_file,
+            fieldnames=[
+                "rx_lat_deg",
+                "rx_lon_deg",
+                "rx_alt_m",
+                "nmea_profile",
+                "nmea_rate_hz",
+                "nmea_msgs",
+                "nmea_talker",
+            ],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "rx_lat_deg": cfg.rx_lat_deg,
+                "rx_lon_deg": cfg.rx_lon_deg,
+                "rx_alt_m": cfg.rx_alt_m,
+                "nmea_profile": "NEO-M8N",
+                "nmea_rate_hz": 1.0,
+                "nmea_msgs": "GGA,RMC",
+                "nmea_talker": "GN",
+            }
+        )
     return output_dir / "epoch_logs.csv"
 
 
