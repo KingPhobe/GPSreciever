@@ -38,17 +38,17 @@ def test_save_outputs_generates_full_plot_set(tmp_path: Path, monkeypatch: pytes
         )
         window.epochs.append(epoch)
 
-    save_root = tmp_path / "saved"
-    save_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.chdir(tmp_path)
+    window.run_name_input.setText("gui run 001")
+    window.current_run_name = "unused"
+    monkeypatch.setattr(gui, "_date_folder_str", lambda: "02132026")
 
-    monkeypatch.setattr(gui.QFileDialog, "getExistingDirectory", lambda *args, **kwargs: str(save_root))
     monkeypatch.setattr(gui.QMessageBox, "information", lambda *args, **kwargs: None)
 
     window.save_outputs()
 
-    created = sorted([p for p in save_root.iterdir() if p.is_dir()])
-    assert len(created) == 1
-    run_dir = created[0]
+    run_dir = tmp_path / "out" / "02132026" / "gui_run_001"
+    assert run_dir.is_dir()
 
     expected_files = {
         "run_table.csv",
@@ -61,3 +61,40 @@ def test_save_outputs_generates_full_plot_set(tmp_path: Path, monkeypatch: pytes
         "attack_telemetry.png",
     }
     assert expected_files.issubset({p.name for p in run_dir.iterdir()})
+
+
+def test_save_outputs_uses_unique_directory_on_collision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _app()
+    gui = pytest.importorskip("sim.desktop_gui")
+
+    window = gui.MainWindow()
+    cfg = SimConfig(duration=2.0, dt=1.0)
+    engine, truth = build_engine_with_truth(cfg)
+    window.cfg = cfg
+    window.engine = engine
+    window.receiver_truth_state = truth
+
+    for t_s in [0.0, 1.0]:
+        step = engine.step(t_s)
+        epoch = build_epoch_log(
+            t_s=t_s,
+            step_out=step,
+            receiver_truth_state=truth,
+            integrity_checker=engine.integrity_checker,
+            attack_name=cfg.attack_name or "none",
+        )
+        window.epochs.append(epoch)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(gui, "_date_folder_str", lambda: "02132026")
+    monkeypatch.setattr(gui.QMessageBox, "information", lambda *args, **kwargs: None)
+    window.run_name_input.setText("gui_run_001")
+
+    first_dir = tmp_path / "out" / "02132026" / "gui_run_001"
+    first_dir.mkdir(parents=True)
+
+    window.save_outputs()
+
+    assert (tmp_path / "out" / "02132026" / "gui_run_001_01").is_dir()

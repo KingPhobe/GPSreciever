@@ -6,6 +6,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+import re
 
 import pandas as pd
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
@@ -15,7 +16,6 @@ from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
-    QFileDialog,
     QFormLayout,
     QGridLayout,
     QGroupBox,
@@ -41,6 +41,32 @@ from sim.run_static_demo import build_engine_with_truth, build_epoch_log
 RESID_RMS_OK_M = 10.0
 PDOP_OK = 6.0
 DIAG_UPDATE_PERIOD_S = 0.3
+
+
+def _date_folder_str() -> str:
+    return datetime.now().strftime("%m%d%Y")
+
+
+def _time_str() -> str:
+    return datetime.now().strftime("%H%M%S")
+
+
+def _sanitize_run_name(name: str) -> str:
+    stripped = name.strip().replace(" ", "_")
+    safe = re.sub(r"[^A-Za-z0-9._-]", "", stripped)
+    if not safe:
+        return f"gui_run_{_time_str()}"
+    return safe
+
+
+def _ensure_unique_dir(path: Path) -> Path:
+    if not path.exists():
+        return path
+    for suffix in range(1, 100):
+        candidate = path.parent / f"{path.name}_{suffix:02d}"
+        if not candidate.exists():
+            return candidate
+    raise RuntimeError(f"Could not create unique directory for {path}")
 
 
 class DiagnosticsWindow(QMainWindow):
@@ -157,6 +183,7 @@ class MainWindow(QMainWindow):
         self.frame = pd.DataFrame()
         self.diagnostics_window: DiagnosticsWindow | None = None
         self.last_diag_update_walltime = 0.0
+        self.current_run_name = ""
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.step_once)
@@ -214,6 +241,7 @@ class MainWindow(QMainWindow):
         self.attack_preset_input.currentTextChanged.connect(self._update_attack_controls)
 
         self.target_sv_input = QLineEdit("G12")
+        self.run_name_input = QLineEdit("")
         self.start_t_input = QDoubleSpinBox()
         self.start_t_input.setRange(0.0, 36000.0)
         self.start_t_input.setValue(10.0)
@@ -227,6 +255,7 @@ class MainWindow(QMainWindow):
         form.addRow("rng_seed", self.rng_seed_input)
         form.addRow("use_ekf", self.use_ekf_input)
         form.addRow("attack preset", self.attack_preset_input)
+        form.addRow("run name", self.run_name_input)
         form.addRow("target_sv", self.target_sv_input)
         form.addRow("start_t", self.start_t_input)
         form.addRow("slope_mps", self.slope_mps_input)
@@ -466,22 +495,20 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "No data", "Run the simulation before saving outputs.")
             return
 
-        default_dir = Path("out")
-        default_dir.mkdir(parents=True, exist_ok=True)
-        out_dir = QFileDialog.getExistingDirectory(self, "Select output folder", str(default_dir))
-        if not out_dir:
-            return
-
-        run_name = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        run_dir = Path(out_dir) / run_name
-        run_dir.mkdir(parents=True, exist_ok=True)
+        base_out = Path("out")
+        date_dir = base_out / _date_folder_str()
+        run_name = _sanitize_run_name(
+            self.run_name_input.text() or self.current_run_name or ""
+        )
+        run_dir = _ensure_unique_dir(date_dir / run_name)
+        run_dir.mkdir(parents=True, exist_ok=False)
 
         df = epochs_to_frame(self.epochs)
         self.frame = df
         df.to_csv(run_dir / "run_table.csv", index=False)
-        plot_update(df, out_dir=str(run_dir), run_name=None)
+        plot_update(df, out_dir=run_dir, run_name=None)
 
-        QMessageBox.information(self, "Saved", f"Saved PNG plots and CSV files to {run_dir}")
+        QMessageBox.information(self, "Saved", f"Saved to: {run_dir}")
 
 
 def main() -> None:
