@@ -20,7 +20,7 @@ from gnss_twin.models import EpochLog, PvtSolution, ReceiverTruth, fix_type_from
 from gnss_twin.receiver.ekf_nav import EkfNav
 from gnss_twin.receiver.gating import postfit_gate, prefit_filter
 from gnss_twin.receiver.tracking_state import TrackingState
-from gnss_twin.receiver.wls_pvt import wls_pvt
+from gnss_twin.receiver.wls_pvt import WlsPvtResult, wls_pvt
 from gnss_twin.runtime.state_machine import ConopsStateMachine
 from gnss_twin.sat.simple_gps import SimpleGpsConfig, SimpleGpsConstellation
 from gnss_twin.utils.wgs84 import lla_to_ecef
@@ -34,6 +34,8 @@ class _IntegrityChecker(Protocol):
         measurements: list[Any],
         sv_states: list[Any],
         sol: Any,
+        *,
+        precomputed_wls: WlsPvtResult | None = None,
     ) -> IntegrityReport: ...
 
 
@@ -80,6 +82,8 @@ class RaimIntegrityChecker:
         measurements: list[Any],
         sv_states: list[Any],
         sol: PvtSolution | None,
+        *,
+        precomputed_wls: WlsPvtResult | None = None,
     ) -> IntegrityReport:
         initial_pos = sol.pos_ecef if sol is not None else None
         initial_clk = sol.clk_bias_s if sol is not None else 0.0
@@ -90,6 +94,7 @@ class RaimIntegrityChecker:
             initial_clk_bias_s=initial_clk,
             config=self.integrity_cfg,
             tracker=self.tracker,
+            precomputed=precomputed_wls,
         )
         self.last_solution = integrity_solution
         self.last_per_sv_stats = {key: dict(value) for key, value in per_sv_stats.items()}
@@ -232,12 +237,28 @@ class SimulationEngine:
         if self.integrity_checker is None:
             return _trivial_integrity_report(measurements, sol)
         checker = self.integrity_checker
+        precomputed_wls = _extract_wls_result(sol)
         if hasattr(checker, "check"):
-            return checker.check(measurements, sv_states, sol)
+            try:
+                return checker.check(
+                    measurements,
+                    sv_states,
+                    sol,
+                    precomputed_wls=precomputed_wls,
+                )
+            except TypeError:
+                return checker.check(measurements, sv_states, sol)
         return checker(measurements, sv_states, sol)
 
     def _update_last_state(self, sol: PvtSolution | None, t_s: float) -> None:
         self._last_t_s = t_s
+
+
+def _extract_wls_result(sol: Any) -> WlsPvtResult | None:
+    if isinstance(sol, WlsPvtResult):
+        return sol
+    candidate = getattr(sol, "wls_result", None)
+    return candidate if isinstance(candidate, WlsPvtResult) else None
 
 
 def _trivial_integrity_report(
@@ -373,6 +394,7 @@ class Engine:
             initial_clk_bias_s=self.last_clk,
             config=self.integrity_cfg,
             tracker=self.tracker,
+            precomputed=wls_solution,
         )
         nis = None
         innov_dim = None

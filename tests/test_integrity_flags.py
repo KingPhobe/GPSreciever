@@ -2,6 +2,7 @@ from dataclasses import replace
 
 import numpy as np
 
+import gnss_twin.integrity.flags as integrity_flags_module
 from gnss_twin.integrity.flags import IntegrityConfig, integrity_pvt
 from gnss_twin.models import GnssMeasurement
 from gnss_twin.meas.pseudorange import LIGHT_SPEED_MPS, geometric_range_m
@@ -265,3 +266,63 @@ def test_integrity_max_residual_threshold_invalidates_fix() -> None:
     assert solution.residuals.max_m > config.max_residual_m
     assert not solution.fix_flags.valid
     assert solution.fix_flags.validity_reason == "max_residual_exceeded"
+
+
+def test_integrity_uses_precomputed_wls_when_raim_passes(monkeypatch) -> None:
+    rng = np.random.default_rng(42)
+    constellation = SimpleGpsConstellation(SimpleGpsConfig(seed=42))
+    receiver_pos = lla_to_ecef(37.0, -122.0, 15.0)
+    sv_states = visible_sv_states(receiver_pos, constellation.get_sv_states(0.0), elevation_mask_deg=5.0)
+    measurements = _make_measurements(
+        receiver_pos,
+        1.0e-6,
+        np.zeros(3),
+        0.0,
+        sv_states,
+        rng,
+        noise_sigma_m=0.5,
+    )
+
+    baseline_calls = 0
+    original_wls_pvt = integrity_flags_module.wls_pvt
+
+    def counting_wls(*args, **kwargs):
+        nonlocal baseline_calls
+        baseline_calls += 1
+        return original_wls_pvt(*args, **kwargs)
+
+    monkeypatch.setattr(integrity_flags_module, "wls_pvt", counting_wls)
+    baseline_solution, _ = integrity_pvt(
+        measurements,
+        sv_states,
+        initial_pos_ecef_m=receiver_pos + 25.0,
+        config=IntegrityConfig(elevation_mask_deg=0.0, max_fde_iterations=1),
+    )
+    assert baseline_solution.fix_flags.raim_passed
+    assert baseline_calls == 1
+
+    precomputed = original_wls_pvt(
+        measurements,
+        sv_states,
+        initial_pos_ecef_m=receiver_pos + 25.0,
+    )
+    assert precomputed is not None
+
+    reused_calls = 0
+
+    def counting_wls_reused(*args, **kwargs):
+        nonlocal reused_calls
+        reused_calls += 1
+        return original_wls_pvt(*args, **kwargs)
+
+    monkeypatch.setattr(integrity_flags_module, "wls_pvt", counting_wls_reused)
+    reused_solution, _ = integrity_pvt(
+        measurements,
+        sv_states,
+        initial_pos_ecef_m=receiver_pos + 25.0,
+        config=IntegrityConfig(elevation_mask_deg=0.0, max_fde_iterations=1),
+        precomputed=precomputed,
+    )
+
+    assert reused_solution.fix_flags.raim_passed
+    assert reused_calls == 0
