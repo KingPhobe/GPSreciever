@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -24,6 +25,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QTabWidget,
     QSpinBox,
     QDoubleSpinBox,
     QVBoxLayout,
@@ -34,6 +36,110 @@ from gnss_twin.config import SimConfig
 from gnss_twin.models import EpochLog, ReceiverTruth
 from gnss_twin.plots import epochs_to_frame, plot_update
 from sim.run_static_demo import build_engine_with_truth, build_epoch_log
+
+
+RESID_RMS_OK_M = 10.0
+PDOP_OK = 6.0
+DIAG_UPDATE_PERIOD_S = 0.3
+
+
+class DiagnosticsWindow(QMainWindow):
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowTitle("GNSS Diagnostics")
+        self.resize(1000, 800)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        tabs = QTabWidget()
+        self.setCentralWidget(tabs)
+
+        self.figure = Figure(figsize=(8, 8))
+        self.canvas = FigureCanvas(self.figure)
+
+        self.ax_pos_err = self.figure.add_subplot(321)
+        self.ax_pdop = self.figure.add_subplot(322)
+        self.ax_residual = self.figure.add_subplot(323)
+        self.ax_clock = self.figure.add_subplot(324)
+        self.ax_sats = self.figure.add_subplot(325)
+        self.ax_fix = self.figure.add_subplot(326)
+
+        (self.line_pos_err,) = self.ax_pos_err.plot([], [], color="tab:purple")
+        self.ax_pos_err.set_title("Position Error")
+        self.ax_pos_err.set_ylabel("Error (m)")
+        self.ax_pos_err.grid(True, alpha=0.3)
+
+        (self.line_pdop,) = self.ax_pdop.plot([], [], color="tab:blue")
+        self.ax_pdop.set_title("PDOP")
+        self.ax_pdop.grid(True, alpha=0.3)
+
+        (self.line_residual,) = self.ax_residual.plot([], [], color="tab:green")
+        self.ax_residual.set_title("Residual RMS")
+        self.ax_residual.set_ylabel("m")
+        self.ax_residual.grid(True, alpha=0.3)
+
+        (self.line_clock,) = self.ax_clock.plot([], [], color="tab:orange")
+        self.ax_clock.set_title("Clock Bias")
+        self.ax_clock.set_ylabel("s")
+        self.ax_clock.grid(True, alpha=0.3)
+
+        (self.line_sats,) = self.ax_sats.plot([], [], color="tab:cyan")
+        self.ax_sats.set_title("Satellites Used")
+        self.ax_sats.set_ylabel("count")
+        self.ax_sats.set_xlabel("t_s")
+        self.ax_sats.grid(True, alpha=0.3)
+
+        (self.line_fix,) = self.ax_fix.step([], [], where="post", color="tab:red")
+        self.ax_fix.set_title("Fix Valid")
+        self.ax_fix.set_ylim(-0.1, 1.1)
+        self.ax_fix.set_yticks([0, 1])
+        self.ax_fix.set_xlabel("t_s")
+        self.ax_fix.grid(True, alpha=0.3)
+
+        self.figure.tight_layout()
+
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.addWidget(self.canvas)
+        tabs.addTab(page, "Core Diagnostics")
+
+    def update_plots(self, frame: pd.DataFrame) -> None:
+        if frame.empty:
+            for line in [
+                self.line_pos_err,
+                self.line_pdop,
+                self.line_residual,
+                self.line_clock,
+                self.line_sats,
+                self.line_fix,
+            ]:
+                line.set_data([], [])
+            self.canvas.draw_idle()
+            return
+
+        t_vals = frame["t_s"].to_numpy(dtype=float)
+        self.line_pos_err.set_data(t_vals, frame["pos_error_m"].to_numpy(dtype=float))
+        self.line_pdop.set_data(t_vals, frame["pdop"].to_numpy(dtype=float))
+        self.line_residual.set_data(t_vals, frame["residual_rms_m"].to_numpy(dtype=float))
+        self.line_clock.set_data(t_vals, frame["clk_bias_s"].to_numpy(dtype=float))
+        self.line_sats.set_data(t_vals, frame["sats_used"].to_numpy(dtype=float))
+        self.line_fix.set_data(t_vals, frame["fix_valid"].to_numpy(dtype=float))
+
+        for axis in [
+            self.ax_pos_err,
+            self.ax_pdop,
+            self.ax_residual,
+            self.ax_clock,
+            self.ax_sats,
+            self.ax_fix,
+        ]:
+            axis.relim()
+            axis.autoscale_view(scaley=axis is not self.ax_fix)
+        self.ax_fix.set_ylim(-0.1, 1.1)
+
+        self.canvas.draw_idle()
 
 
 class MainWindow(QMainWindow):
@@ -49,6 +155,8 @@ class MainWindow(QMainWindow):
         self.is_running = False
         self.epochs: list[EpochLog] = []
         self.frame = pd.DataFrame()
+        self.diagnostics_window: DiagnosticsWindow | None = None
+        self.last_diag_update_walltime = 0.0
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.step_once)
@@ -128,12 +236,14 @@ class MainWindow(QMainWindow):
         self.stop_button = QPushButton("Stop")
         self.step_button = QPushButton("Step")
         self.save_button = QPushButton("Save plots")
+        self.open_plots_button = QPushButton("Open Plots")
 
         self.init_button.clicked.connect(self.initialize_reset)
         self.run_button.clicked.connect(self.start_run)
         self.stop_button.clicked.connect(self.stop_run)
         self.step_button.clicked.connect(self.step_once)
         self.save_button.clicked.connect(self.save_outputs)
+        self.open_plots_button.clicked.connect(self.open_diagnostics)
 
         btns = QGridLayout()
         btns.addWidget(self.init_button, 0, 0, 1, 2)
@@ -141,6 +251,7 @@ class MainWindow(QMainWindow):
         btns.addWidget(self.stop_button, 1, 1)
         btns.addWidget(self.step_button, 2, 0)
         btns.addWidget(self.save_button, 2, 1)
+        btns.addWidget(self.open_plots_button, 3, 0, 1, 2)
         form.addRow(btns)
         return group
 
@@ -168,24 +279,23 @@ class MainWindow(QMainWindow):
     def _build_plot_box(self) -> QWidget:
         box = QWidget()
         layout = QVBoxLayout(box)
-        self.figure = Figure(figsize=(8, 8))
+        self.figure = Figure(figsize=(8, 4))
         self.canvas = FigureCanvas(self.figure)
-        self.ax_pdop = self.figure.add_subplot(311)
-        self.ax_residual = self.figure.add_subplot(312)
-        self.ax_clock = self.figure.add_subplot(313)
+        self.ax_flags = self.figure.add_subplot(111)
 
-        (self.line_pdop,) = self.ax_pdop.plot([], [], color="tab:blue")
-        self.ax_pdop.set_ylabel("PDOP")
-        self.ax_pdop.grid(True, alpha=0.3)
+        (self.line_attack_active,) = self.ax_flags.step([], [], where="post", label="attack_active")
+        (self.line_gnss_valid,) = self.ax_flags.step([], [], where="post", label="gnss_valid")
+        (self.line_receiver_health,) = self.ax_flags.step(
+            [], [], where="post", label="receiver_health"
+        )
 
-        (self.line_residual,) = self.ax_residual.plot([], [], color="tab:green")
-        self.ax_residual.set_ylabel("Residual RMS (m)")
-        self.ax_residual.grid(True, alpha=0.3)
-
-        (self.line_clock,) = self.ax_clock.plot([], [], color="tab:orange")
-        self.ax_clock.set_ylabel("Clock bias (s)")
-        self.ax_clock.set_xlabel("t_s")
-        self.ax_clock.grid(True, alpha=0.3)
+        self.ax_flags.set_title("Flags / Health")
+        self.ax_flags.set_ylabel("state")
+        self.ax_flags.set_xlabel("t_s")
+        self.ax_flags.set_ylim(-0.1, 1.1)
+        self.ax_flags.set_yticks([0, 1])
+        self.ax_flags.grid(True, alpha=0.3)
+        self.ax_flags.legend(loc="upper right")
 
         self.figure.tight_layout()
         layout.addWidget(self.canvas)
@@ -222,7 +332,9 @@ class MainWindow(QMainWindow):
         self.t_s_current = 0.0
         self.epochs = []
         self.frame = pd.DataFrame()
-        self._refresh_plots()
+        self._refresh_flags_plot()
+        if self.diagnostics_window is not None:
+            self.diagnostics_window.update_plots(self.frame)
         self._update_status_labels()
 
     def _compute_timer_ms(self) -> int:
@@ -260,7 +372,8 @@ class MainWindow(QMainWindow):
 
         self.t_s_current += float(self.cfg.dt)
         self._update_status_labels(epoch)
-        self._refresh_plots()
+        self._refresh_flags_plot()
+        self._maybe_update_diagnostics()
 
         if self.t_s_current >= float(self.cfg.duration):
             self.stop_run()
@@ -293,27 +406,60 @@ class MainWindow(QMainWindow):
         for key, label in self.status_labels.items():
             label.setText(values[key])
 
-    def _refresh_plots(self) -> None:
+    def _derive_binary_flags(self, frame: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
+        gnss_valid = (
+            (frame["sats_used"] >= 4)
+            & (frame["residual_rms_m"] <= RESID_RMS_OK_M)
+            & (frame["pdop"] <= PDOP_OK)
+        ).fillna(False)
+        receiver_health = (
+            gnss_valid
+            & frame["residual_rms_m"].notna()
+            & frame[["pos_ecef_x", "pos_ecef_y", "pos_ecef_z"]].notna().all(axis=1)
+        ).fillna(False)
+        return gnss_valid.astype(float), receiver_health.astype(float)
+
+    def _refresh_flags_plot(self) -> None:
         if self.frame.empty:
-            for line in [self.line_pdop, self.line_residual, self.line_clock]:
+            for line in [self.line_attack_active, self.line_gnss_valid, self.line_receiver_health]:
                 line.set_data([], [])
             self.canvas.draw_idle()
             return
 
         t_vals = self.frame["t_s"].to_numpy(dtype=float)
-        pdop_vals = self.frame["pdop"].to_numpy(dtype=float)
-        residual_vals = self.frame["residual_rms_m"].to_numpy(dtype=float)
-        clock_vals = self.frame["clk_bias_s"].to_numpy(dtype=float)
+        gnss_valid, receiver_health = self._derive_binary_flags(self.frame)
 
-        self.line_pdop.set_data(t_vals, pdop_vals)
-        self.line_residual.set_data(t_vals, residual_vals)
-        self.line_clock.set_data(t_vals, clock_vals)
+        self.line_attack_active.set_data(t_vals, self.frame["attack_active"].astype(float).to_numpy())
+        self.line_gnss_valid.set_data(t_vals, gnss_valid.to_numpy(dtype=float))
+        self.line_receiver_health.set_data(t_vals, receiver_health.to_numpy(dtype=float))
 
-        for axis in [self.ax_pdop, self.ax_residual, self.ax_clock]:
-            axis.relim()
-            axis.autoscale_view()
+        self.ax_flags.relim()
+        self.ax_flags.autoscale_view(scaley=False)
+        self.ax_flags.set_ylim(-0.1, 1.1)
 
         self.canvas.draw_idle()
+
+    def open_diagnostics(self) -> None:
+        if self.diagnostics_window is None:
+            self.diagnostics_window = DiagnosticsWindow()
+            self.diagnostics_window.destroyed.connect(self._on_diagnostics_closed)
+        self.diagnostics_window.show()
+        self.diagnostics_window.raise_()
+        self.diagnostics_window.activateWindow()
+        self.last_diag_update_walltime = 0.0
+        self._maybe_update_diagnostics(force=True)
+
+    def _on_diagnostics_closed(self) -> None:
+        self.diagnostics_window = None
+
+    def _maybe_update_diagnostics(self, force: bool = False) -> None:
+        if self.diagnostics_window is None:
+            return
+        now = time.monotonic()
+        if not force and now - self.last_diag_update_walltime < DIAG_UPDATE_PERIOD_S:
+            return
+        self.last_diag_update_walltime = now
+        self.diagnostics_window.update_plots(self.frame)
 
     def save_outputs(self) -> None:
         if not self.epochs:
