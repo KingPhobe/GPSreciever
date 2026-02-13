@@ -123,6 +123,13 @@ def epochs_to_frame(epochs: list[EpochLog]) -> Any:
     import pandas as pd
 
     payload = []
+    first_epoch = epochs[0] if epochs else None
+    default_attack_start_t_s = getattr(first_epoch, "attack_start_t_s", "") if first_epoch else ""
+    default_attack_end_t_s = getattr(first_epoch, "attack_end_t_s", "") if first_epoch else ""
+    default_attack_ramp_rate_mps = (
+        getattr(first_epoch, "attack_ramp_rate_mps", "") if first_epoch else ""
+    )
+    default_attack_target_sv = getattr(first_epoch, "attack_target_sv", "") if first_epoch else ""
     for epoch in epochs:
         solution = epoch.solution
         pos_error = _position_error(epoch)
@@ -144,6 +151,14 @@ def epochs_to_frame(epochs: list[EpochLog]) -> Any:
                 "attack_active": bool(epoch.attack_active),
                 "attack_pr_bias_mean_m": float(epoch.attack_pr_bias_mean_m),
                 "attack_prr_bias_mean_mps": float(epoch.attack_prr_bias_mean_mps),
+                "attack_start_t_s": getattr(epoch, "attack_start_t_s", default_attack_start_t_s),
+                "attack_end_t_s": getattr(epoch, "attack_end_t_s", default_attack_end_t_s),
+                "attack_ramp_rate_mps": getattr(
+                    epoch,
+                    "attack_ramp_rate_mps",
+                    default_attack_ramp_rate_mps,
+                ),
+                "attack_target_sv": getattr(epoch, "attack_target_sv", default_attack_target_sv),
                 "pos_ecef_x": solution.pos_ecef[0] if solution is not None else float("nan"),
                 "pos_ecef_y": solution.pos_ecef[1] if solution is not None else float("nan"),
                 "pos_ecef_z": solution.pos_ecef[2] if solution is not None else float("nan"),

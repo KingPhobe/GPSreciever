@@ -237,7 +237,7 @@ class MainWindow(QMainWindow):
         self.use_ekf_input.setChecked(True)
 
         self.attack_preset_input = QComboBox()
-        self.attack_preset_input.addItems(["none", "spoof_pr_ramp"])
+        self.attack_preset_input.addItems(["none", "spoof_pr_ramp", "spoof_clock_ramp"])
         self.attack_preset_input.currentTextChanged.connect(self._update_attack_controls)
 
         self.target_sv_input = QLineEdit("G12")
@@ -245,9 +245,23 @@ class MainWindow(QMainWindow):
         self.start_t_input = QDoubleSpinBox()
         self.start_t_input.setRange(0.0, 36000.0)
         self.start_t_input.setValue(10.0)
+        self.start_t_input.setDecimals(2)
+        self.t_end_input = QDoubleSpinBox()
+        self.t_end_input.setRange(-1.0, 1_000_000_000.0)
+        self.t_end_input.setValue(-1.0)
+        self.t_end_input.setDecimals(2)
         self.slope_mps_input = QDoubleSpinBox()
         self.slope_mps_input.setRange(-1000.0, 1000.0)
         self.slope_mps_input.setValue(2.0)
+
+        time_window = QWidget()
+        time_window_layout = QHBoxLayout(time_window)
+        time_window_layout.setContentsMargins(0, 0, 0, 0)
+        time_window_layout.addWidget(QLabel("start_t (s)"))
+        time_window_layout.addWidget(self.start_t_input)
+        time_window_layout.addSpacing(8)
+        time_window_layout.addWidget(QLabel("t_end (s)"))
+        time_window_layout.addWidget(self.t_end_input)
 
         form.addRow("duration_s", self.duration_s_input)
         form.addRow("dt_s", self.dt_s_input)
@@ -257,8 +271,8 @@ class MainWindow(QMainWindow):
         form.addRow("attack preset", self.attack_preset_input)
         form.addRow("run name", self.run_name_input)
         form.addRow("target_sv", self.target_sv_input)
-        form.addRow("start_t", self.start_t_input)
-        form.addRow("slope_mps", self.slope_mps_input)
+        form.addRow("attack window", time_window)
+        form.addRow("ramp_rate_mps", self.slope_mps_input)
 
         self.init_button = QPushButton("Initialize / Reset")
         self.run_button = QPushButton("Run")
@@ -331,20 +345,29 @@ class MainWindow(QMainWindow):
         return box
 
     def _update_attack_controls(self) -> None:
-        is_spoof = self.attack_preset_input.currentText() == "spoof_pr_ramp"
-        self.target_sv_input.setEnabled(is_spoof)
-        self.start_t_input.setEnabled(is_spoof)
-        self.slope_mps_input.setEnabled(is_spoof)
+        attack_name = self.attack_preset_input.currentText()
+        is_ramp = attack_name in {"spoof_pr_ramp", "spoof_clock_ramp"}
+        self.target_sv_input.setEnabled(attack_name == "spoof_pr_ramp")
+        self.start_t_input.setEnabled(is_ramp)
+        self.t_end_input.setEnabled(is_ramp)
+        self.slope_mps_input.setEnabled(is_ramp)
 
     def _build_config(self) -> SimConfig:
         attack_name = self.attack_preset_input.currentText()
         attack_params: dict[str, float | str] = {}
-        if attack_name == "spoof_pr_ramp":
+        if attack_name in {"spoof_pr_ramp", "spoof_clock_ramp"}:
+            start_t = float(self.start_t_input.value())
+            ramp_rate_mps = float(self.slope_mps_input.value())
+            t_end_val = float(self.t_end_input.value())
+            end_t = None if t_end_val < 0 else t_end_val
             attack_params = {
-                "target_sv": self.target_sv_input.text().strip(),
-                "start_t": float(self.start_t_input.value()),
-                "ramp_rate_mps": float(self.slope_mps_input.value()),
+                "start_t": start_t,
+                "ramp_rate_mps": ramp_rate_mps,
             }
+            if end_t is not None:
+                attack_params["end_t"] = end_t
+            if attack_name == "spoof_pr_ramp":
+                attack_params["target_sv"] = self.target_sv_input.text().strip()
         return SimConfig(
             duration=float(self.duration_s_input.value()),
             dt=float(self.dt_s_input.value()),
@@ -504,6 +527,14 @@ class MainWindow(QMainWindow):
         run_dir.mkdir(parents=True, exist_ok=False)
 
         df = epochs_to_frame(self.epochs)
+        if self.cfg is not None:
+            attack_name = self.cfg.attack_name or "none"
+            attack_params = self.cfg.attack_params
+            df["attack_start_t_s"] = attack_params.get("start_t", "")
+            df["attack_end_t_s"] = attack_params.get("end_t", "")
+            df["attack_ramp_rate_mps"] = attack_params.get("ramp_rate_mps", "")
+            target_sv = attack_params.get("target_sv", "") if attack_name == "spoof_pr_ramp" else ""
+            df["attack_target_sv"] = target_sv
         self.frame = df
         df.to_csv(run_dir / "run_table.csv", index=False)
         plot_update(df, out_dir=run_dir, run_name=None)
