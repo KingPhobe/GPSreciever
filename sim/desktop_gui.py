@@ -35,6 +35,8 @@ from PyQt6.QtWidgets import (
 from gnss_twin.config import SimConfig
 from gnss_twin.models import EpochLog, ReceiverTruth
 from gnss_twin.plots import epochs_to_frame, plot_update
+from gnss_twin.sat.simple_gps import SimpleGpsConfig, SimpleGpsConstellation
+from gnss_twin.utils.angles import elev_az_from_rx_sv
 from sim.run_static_demo import build_engine_with_truth, build_epoch_log
 
 
@@ -67,6 +69,32 @@ def _ensure_unique_dir(path: Path) -> Path:
         if not candidate.exists():
             return candidate
     raise RuntimeError(f"Could not create unique directory for {path}")
+
+
+def _visible_svs_at_time(
+    t_s: float, receiver_truth: ReceiverTruth, elev_mask_deg: float, seed: int
+) -> list[str]:
+    const = SimpleGpsConstellation(SimpleGpsConfig(seed=int(seed)))
+    svs: list[str] = []
+    for st in const.get_sv_states(float(t_s)):
+        elev_deg, _ = elev_az_from_rx_sv(receiver_truth.pos_ecef_m, st.pos_ecef_m)
+        if elev_deg >= float(elev_mask_deg):
+            svs.append(st.sv_id)
+    return sorted(svs)
+
+
+def _resolve_target_sv(chosen: str, visible: list[str], auto_select: bool) -> tuple[str, bool, str]:
+    if chosen in visible:
+        return chosen, True, ""
+    if auto_select and visible:
+        auto_choice = visible[0]
+        msg = (
+            f"target_sv_not_visible_at_start_t; requested={chosen}; "
+            f"auto_selected={auto_choice}; visible={visible}"
+        )
+        return auto_choice, True, msg
+    msg = f"target_sv_not_visible_at_start_t; requested={chosen}; visible={visible}"
+    return chosen, False, msg
 
 
 class DiagnosticsWindow(QMainWindow):
@@ -184,12 +212,16 @@ class MainWindow(QMainWindow):
         self.diagnostics_window: DiagnosticsWindow | None = None
         self.last_diag_update_walltime = 0.0
         self.current_run_name = ""
+        self.attack_config_ok = True
+        self.attack_config_msg = ""
+        self.attack_never_applied_warned = False
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.step_once)
 
         self._build_ui()
         self._update_attack_controls()
+        self._refresh_visible_svs()
         self._update_status_labels()
 
     def _build_ui(self) -> None:
@@ -237,10 +269,15 @@ class MainWindow(QMainWindow):
         self.use_ekf_input.setChecked(True)
 
         self.attack_preset_input = QComboBox()
-        self.attack_preset_input.addItems(["none", "spoof_pr_ramp", "spoof_clock_ramp"])
+        self.attack_preset_input.addItems(["none", "spoof_clock_ramp", "spoof_pr_ramp"])
         self.attack_preset_input.currentTextChanged.connect(self._update_attack_controls)
+        self.attack_preset_input.currentTextChanged.connect(self._refresh_visible_svs)
 
-        self.target_sv_input = QLineEdit("G12")
+        self.target_sv_dropdown = QComboBox()
+        self.refresh_svs_btn = QPushButton("Refresh SVs")
+        self.refresh_svs_btn.clicked.connect(self._refresh_visible_svs)
+        self.auto_select_sv_checkbox = QCheckBox("Auto-select visible SV if target not visible")
+        self.auto_select_sv_checkbox.setChecked(True)
         self.run_name_input = QLineEdit("")
         self.start_t_input = QDoubleSpinBox()
         self.start_t_input.setRange(0.0, 36000.0)
@@ -253,6 +290,19 @@ class MainWindow(QMainWindow):
         self.slope_mps_input = QDoubleSpinBox()
         self.slope_mps_input.setRange(-1000.0, 1000.0)
         self.slope_mps_input.setValue(2.0)
+        self.start_t_input.valueChanged.connect(self._refresh_visible_svs)
+        self.rng_seed_input.valueChanged.connect(self._refresh_visible_svs)
+
+        target_sv_widget = QWidget()
+        target_sv_layout = QHBoxLayout(target_sv_widget)
+        target_sv_layout.setContentsMargins(0, 0, 0, 0)
+        target_sv_layout.addWidget(self.target_sv_dropdown, stretch=1)
+        target_sv_layout.addWidget(self.refresh_svs_btn)
+
+        self.target_sv_label = QLabel("target_sv")
+        self.attack_window_label = QLabel("attack window")
+        self.ramp_rate_label = QLabel("ramp_rate_mps")
+        self.auto_select_label = QLabel("target behavior")
 
         time_window = QWidget()
         time_window_layout = QHBoxLayout(time_window)
@@ -270,9 +320,10 @@ class MainWindow(QMainWindow):
         form.addRow("use_ekf", self.use_ekf_input)
         form.addRow("attack preset", self.attack_preset_input)
         form.addRow("run name", self.run_name_input)
-        form.addRow("target_sv", self.target_sv_input)
-        form.addRow("attack window", time_window)
-        form.addRow("ramp_rate_mps", self.slope_mps_input)
+        form.addRow(self.target_sv_label, target_sv_widget)
+        form.addRow(self.auto_select_label, self.auto_select_sv_checkbox)
+        form.addRow(self.attack_window_label, time_window)
+        form.addRow(self.ramp_rate_label, self.slope_mps_input)
 
         self.init_button = QPushButton("Initialize / Reset")
         self.run_button = QPushButton("Run")
@@ -347,14 +398,45 @@ class MainWindow(QMainWindow):
     def _update_attack_controls(self) -> None:
         attack_name = self.attack_preset_input.currentText()
         is_ramp = attack_name in {"spoof_pr_ramp", "spoof_clock_ramp"}
-        self.target_sv_input.setEnabled(attack_name == "spoof_pr_ramp")
+        for widget in [
+            self.target_sv_label,
+            self.target_sv_dropdown,
+            self.refresh_svs_btn,
+            self.auto_select_label,
+            self.auto_select_sv_checkbox,
+        ]:
+            widget.setVisible(attack_name == "spoof_pr_ramp")
+        self.refresh_svs_btn.setEnabled(attack_name == "spoof_pr_ramp")
         self.start_t_input.setEnabled(is_ramp)
         self.t_end_input.setEnabled(is_ramp)
         self.slope_mps_input.setEnabled(is_ramp)
+        self.attack_window_label.setVisible(is_ramp)
+        self.ramp_rate_label.setVisible(is_ramp)
+
+    def _refresh_visible_svs(self) -> None:
+        cfg = SimConfig(
+            duration=float(self.duration_s_input.value()),
+            dt=float(self.dt_s_input.value()),
+            rng_seed=int(self.rng_seed_input.value()),
+            use_ekf=bool(self.use_ekf_input.isChecked()),
+        )
+        rx_truth = self.receiver_truth_state
+        if rx_truth is None:
+            _, rx_truth = build_engine_with_truth(cfg)
+            self.receiver_truth_state = rx_truth
+        start_t = float(self.start_t_input.value())
+        visible = _visible_svs_at_time(start_t, rx_truth, cfg.elev_mask_deg, cfg.rng_seed)
+        self.target_sv_dropdown.clear()
+        if visible:
+            self.target_sv_dropdown.addItems(visible)
+        else:
+            self.target_sv_dropdown.addItem("NONE_VISIBLE")
 
     def _build_config(self) -> SimConfig:
         attack_name = self.attack_preset_input.currentText()
         attack_params: dict[str, float | str] = {}
+        self.attack_config_ok = True
+        self.attack_config_msg = ""
         if attack_name in {"spoof_pr_ramp", "spoof_clock_ramp"}:
             start_t = float(self.start_t_input.value())
             ramp_rate_mps = float(self.slope_mps_input.value())
@@ -367,7 +449,34 @@ class MainWindow(QMainWindow):
             if end_t is not None:
                 attack_params["end_t"] = end_t
             if attack_name == "spoof_pr_ramp":
-                attack_params["target_sv"] = self.target_sv_input.text().strip()
+                partial_cfg = SimConfig(rng_seed=int(self.rng_seed_input.value()))
+                rx_truth = self.receiver_truth_state
+                if rx_truth is None:
+                    _, rx_truth = build_engine_with_truth(partial_cfg)
+                    self.receiver_truth_state = rx_truth
+                visible = _visible_svs_at_time(
+                    start_t,
+                    rx_truth,
+                    partial_cfg.elev_mask_deg,
+                    partial_cfg.rng_seed,
+                )
+                chosen = self.target_sv_dropdown.currentText().strip()
+                resolved, ok, msg = _resolve_target_sv(
+                    chosen,
+                    visible,
+                    self.auto_select_sv_checkbox.isChecked(),
+                )
+                if not ok:
+                    self.attack_config_ok = False
+                    self.attack_config_msg = msg
+                    raise ValueError(
+                        f"Target SV {chosen} is not visible at t={start_t:.2f}s. Visible: {visible}"
+                    )
+                if msg:
+                    self.attack_config_msg = msg
+                if resolved != chosen:
+                    self.target_sv_dropdown.setCurrentText(resolved)
+                attack_params["target_sv"] = resolved
         return SimConfig(
             duration=float(self.duration_s_input.value()),
             dt=float(self.dt_s_input.value()),
@@ -379,11 +488,16 @@ class MainWindow(QMainWindow):
 
     def initialize_reset(self) -> None:
         self.stop_run()
-        self.cfg = self._build_config()
+        try:
+            self.cfg = self._build_config()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Invalid attack configuration", str(exc))
+            return
         self.engine, self.receiver_truth_state = build_engine_with_truth(self.cfg)
         self.t_s_current = 0.0
         self.epochs = []
         self.frame = pd.DataFrame()
+        self.attack_never_applied_warned = False
         self._refresh_flags_plot()
         if self.diagnostics_window is not None:
             self.diagnostics_window.update_plots(self.frame)
@@ -397,6 +511,8 @@ class MainWindow(QMainWindow):
     def start_run(self) -> None:
         if self.engine is None:
             self.initialize_reset()
+        if self.engine is None:
+            return
         self.is_running = True
         self.timer.start(self._compute_timer_ms())
 
@@ -409,6 +525,7 @@ class MainWindow(QMainWindow):
             return
         if self.t_s_current >= float(self.cfg.duration):
             self.stop_run()
+            self._warn_if_attack_never_applied()
             return
 
         step_out = self.engine.step(float(self.t_s_current))
@@ -429,6 +546,7 @@ class MainWindow(QMainWindow):
 
         if self.t_s_current >= float(self.cfg.duration):
             self.stop_run()
+            self._warn_if_attack_never_applied()
 
     def _update_status_labels(self, epoch: EpochLog | None = None) -> None:
         values = {
@@ -530,16 +648,38 @@ class MainWindow(QMainWindow):
         if self.cfg is not None:
             attack_name = self.cfg.attack_name or "none"
             attack_params = self.cfg.attack_params
+            df["attack_name"] = attack_name
             df["attack_start_t_s"] = attack_params.get("start_t", "")
             df["attack_end_t_s"] = attack_params.get("end_t", "")
             df["attack_ramp_rate_mps"] = attack_params.get("ramp_rate_mps", "")
             target_sv = attack_params.get("target_sv", "") if attack_name == "spoof_pr_ramp" else ""
             df["attack_target_sv"] = target_sv
+            df["attack_config_ok"] = bool(self.attack_config_ok)
+            df["attack_config_msg"] = self.attack_config_msg
         self.frame = df
         df.to_csv(run_dir / "run_table.csv", index=False)
         plot_update(df, out_dir=run_dir, run_name=None)
+        self._warn_if_attack_never_applied()
 
         QMessageBox.information(self, "Saved", f"Saved to: {run_dir}")
+
+    def _warn_if_attack_never_applied(self) -> None:
+        if self.attack_never_applied_warned or self.cfg is None or self.frame.empty:
+            return
+        attack_name = self.cfg.attack_name or "none"
+        if attack_name == "none":
+            return
+        if bool(self.frame["attack_active"].astype(bool).max()):
+            return
+        self.attack_never_applied_warned = True
+        QMessageBox.warning(
+            self,
+            "Attack not applied",
+            (
+                "Attack was configured but never applied. For spoof_pr_ramp, "
+                "confirm target SV is visible at start_t."
+            ),
+        )
 
 
 def main() -> None:
