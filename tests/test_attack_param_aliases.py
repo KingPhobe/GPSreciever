@@ -21,3 +21,9 @@ def test_create_attack_maps_slope_mps_alias() -> None:
     attack = create_attack("spoof_clock_ramp", {"slope_mps": 10})
     assert isinstance(attack, SpoofClockRampAttack)
     assert attack.ramp_rate_mps == 10.0
+
+
+def test_live_runner_parse_kv_list_converts_boolean_values() -> None:
+    params = parse_kv_list(["auto_select_visible_sv=true", "strict_target_sv=false"])
+    assert params["auto_select_visible_sv"] is True
+    assert params["strict_target_sv"] is False
