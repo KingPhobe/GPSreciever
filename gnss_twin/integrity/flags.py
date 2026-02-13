@@ -90,10 +90,10 @@ def integrity_pvt(
         for sv_id, info in tracking_info.items()
     }
 
-    mask_ok = all(meas.elev_deg >= cfg.elevation_mask_deg for meas in measurements)
     masked = [meas for meas in measurements if meas.elev_deg >= cfg.elevation_mask_deg]
+    mask_ok = len(masked) >= 4
     if len(masked) < 4:
-        return _no_fix_solution(len(measurements), mask_ok), per_sv_stats
+        return _no_fix_solution(len(measurements), mask_ok, "insufficient_masked_sv"), per_sv_stats
 
     used = masked
     rejected: list[str] = []
@@ -111,7 +111,7 @@ def integrity_pvt(
             initial_clk_bias_s=initial_clk_bias_s,
         )
         if solution is None:
-            return _no_fix_solution(len(measurements), mask_ok), per_sv_stats
+            return _no_fix_solution(len(measurements), mask_ok, "solver_failed"), per_sv_stats
         residuals_by_sv = solution.residuals_m
         if not residuals_by_sv:
             raim_passed = True
@@ -133,7 +133,7 @@ def integrity_pvt(
         rejected.append(worst_sv)
         used = [meas for meas in used if meas.sv_id != worst_sv]
         if len(used) < 4:
-            return _no_fix_solution(len(measurements), mask_ok), per_sv_stats
+            return _no_fix_solution(len(measurements), mask_ok, "insufficient_sv_after_fde"), per_sv_stats
 
     residual_stats = _compute_residual_stats(used, residuals_by_sv)
     chi_square_threshold = raim_threshold if np.isfinite(raim_threshold) else _chi_square_threshold(
@@ -141,6 +141,7 @@ def integrity_pvt(
         cfg.chi_square_alpha,
     )
     chi_square_ok = raim_passed
+    residual_ok = bool(np.isfinite(residual_stats.max_m) and residual_stats.max_m <= cfg.max_residual_m)
     dop = solution.dop
     dop_ok = (
         np.isfinite(dop.pdop)
@@ -148,7 +149,16 @@ def integrity_pvt(
         and dop.pdop <= cfg.pdop_max
         and dop.gdop <= cfg.gdop_max
     )
-    valid = mask_ok and dop_ok and chi_square_ok
+    valid = mask_ok and dop_ok and chi_square_ok and residual_ok
+    validity_reason = "ok"
+    if not mask_ok:
+        validity_reason = "insufficient_masked_sv"
+    elif not dop_ok:
+        validity_reason = "dop_limit"
+    elif not chi_square_ok:
+        validity_reason = "raim_failed"
+    elif not residual_ok:
+        validity_reason = "max_residual_exceeded"
     fix_type = _fix_type(len(used), dop, cfg)
 
     for meas in used:
@@ -181,6 +191,7 @@ def integrity_pvt(
         chi_square=residual_stats.chi_square,
         chi_square_threshold=chi_square_threshold,
         raim_passed=raim_passed,
+        validity_reason=validity_reason,
     )
     return _solution_from_wls(solution, residual_stats, fix_flags), per_sv_stats
 
@@ -201,7 +212,7 @@ def _solution_from_wls(
     )
 
 
-def _no_fix_solution(sv_in_view: int, mask_ok: bool) -> PvtSolution:
+def _no_fix_solution(sv_in_view: int, mask_ok: bool, validity_reason: str) -> PvtSolution:
     nan_vec = np.full(3, np.nan)
     dop = DopMetrics(gdop=float("nan"), pdop=float("nan"), hdop=float("nan"), vdop=float("nan"))
     residuals = ResidualStats(rms_m=float("nan"), mean_m=float("nan"), max_m=float("nan"), chi_square=float("nan"))
@@ -218,6 +229,7 @@ def _no_fix_solution(sv_in_view: int, mask_ok: bool) -> PvtSolution:
         chi_square=float("nan"),
         chi_square_threshold=float("inf"),
         raim_passed=False,
+        validity_reason=validity_reason,
     )
     return PvtSolution(
         pos_ecef=nan_vec,
