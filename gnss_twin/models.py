@@ -84,6 +84,7 @@ class FixFlags:
     chi_square: float
     chi_square_threshold: float
     raim_passed: bool
+    validity_reason: str
 
 
 class FixType(IntEnum):

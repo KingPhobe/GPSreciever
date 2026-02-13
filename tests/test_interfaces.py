@@ -100,6 +100,7 @@ def test_dataclass_fields() -> None:
         "chi_square",
         "chi_square_threshold",
         "raim_passed",
+        "validity_reason",
     ]
 
 
@@ -156,6 +157,7 @@ class DummySolver(NavSolver):
                 chi_square=float("nan"),
                 chi_square_threshold=float("inf"),
                 raim_passed=False,
+                validity_reason="insufficient_masked_sv",
             ),
         )
 
