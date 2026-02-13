@@ -8,7 +8,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 from gnss_twin.config import SimConfig
@@ -67,6 +66,9 @@ class _LiveController:
 
 class _LivePlotter:
     def __init__(self, max_points: int = 300) -> None:
+        import matplotlib.pyplot as plt
+
+        self._plt = plt
         self.max_points = max_points
         self.t_s: list[float] = []
         self.residual_rms_m: list[float] = []
@@ -74,8 +76,8 @@ class _LivePlotter:
         self.clk_bias_s: list[float] = []
         self.attack_pr_bias_mean_m: list[float] = []
 
-        plt.ion()
-        self.fig, axes = plt.subplots(4, 1, sharex=True, figsize=(10, 8))
+        self._plt.ion()
+        self.fig, axes = self._plt.subplots(4, 1, sharex=True, figsize=(10, 8))
         self.axes = axes
         (self.residual_line,) = axes[0].plot([], [], lw=1.8)
         (self.pdop_line,) = axes[1].plot([], [], lw=1.8)
@@ -113,7 +115,14 @@ class _LivePlotter:
             axis.relim()
             axis.autoscale_view()
         self.fig.canvas.draw_idle()
-        plt.pause(0.001)
+        self._plt.pause(0.001)
+
+    def pause(self, seconds: float) -> None:
+        self._plt.pause(seconds)
+
+    def close(self) -> None:
+        self._plt.ioff()
+        self._plt.close(self.fig)
 
 
 def _json_safe(value: Any) -> Any:
@@ -138,6 +147,82 @@ def _as_int(value: Any, default: int | None = None) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def epoch_to_dict(t_s: float, step: dict[str, Any], attack_name: str) -> dict[str, Any]:
+    """Convert a live-runner epoch output into a JSONL-compatible record."""
+    sol = step.get("sol")
+    integrity = step.get("integrity")
+    conops = step.get("conops")
+    attack_report = step.get("attack_report")
+
+    fix_flags = getattr(sol, "fix_flags", None)
+    dop = getattr(sol, "dop", None)
+    residuals = getattr(sol, "residuals", None)
+
+    fix_valid = getattr(fix_flags, "valid", None)
+    fix_type = getattr(fix_flags, "fix_type", None)
+    sats_used = _as_int(getattr(fix_flags, "sv_count", None))
+    pdop = _as_float(getattr(dop, "pdop", None))
+    residual_rms_m = _as_float(getattr(residuals, "rms_m", None))
+    clk_bias_s = _as_float(getattr(sol, "clk_bias_s", None))
+    clk_drift_sps = _as_float(getattr(sol, "clk_drift_sps", None))
+
+    nis = _as_float(getattr(integrity, "nis", None))
+    is_suspect = bool(getattr(integrity, "is_suspect", False))
+    is_invalid = bool(getattr(integrity, "is_invalid", False))
+    nis_alarm = is_suspect or is_invalid
+    integrity_p_value = _as_float(getattr(integrity, "p_value", None))
+    excluded_sv_ids = getattr(integrity, "excluded_sv_ids", []) or []
+    integrity_excluded_sv_ids_count = len(excluded_sv_ids)
+
+    applied_count = int(getattr(attack_report, "applied_count", 0) or 0)
+    attack_active = applied_count > 0
+    if attack_active:
+        attack_pr_bias_mean_m = _as_float(getattr(attack_report, "pr_bias_sum_m", 0.0)) / applied_count
+        attack_prr_bias_mean_mps = _as_float(getattr(attack_report, "prr_bias_sum_mps", 0.0)) / applied_count
+    else:
+        attack_pr_bias_mean_m = 0.0
+        attack_prr_bias_mean_mps = 0.0
+
+    conops_status = getattr(getattr(conops, "status", None), "value", None)
+    conops_mode5 = getattr(getattr(conops, "mode5", None), "value", None)
+
+    return {
+        "t_s": _json_safe(float(t_s)),
+        "fix_valid": _json_safe(fix_valid),
+        "fix_type": _json_safe(fix_type),
+        "sats_used": _json_safe(sats_used),
+        "n_sats_used": _json_safe(sats_used),
+        "pdop": _json_safe(pdop),
+        "residual_rms_m": _json_safe(residual_rms_m),
+        "clk_bias_s": _json_safe(clk_bias_s),
+        "clk_drift_sps": _json_safe(clk_drift_sps),
+        "nis": _json_safe(nis),
+        "nis_alarm": _json_safe(nis_alarm),
+        "conops_status": _json_safe(conops_status),
+        "conops_mode5": _json_safe(conops_mode5),
+        "integrity_p_value": _json_safe(integrity_p_value),
+        "integrity_excluded_sv_ids_count": _json_safe(integrity_excluded_sv_ids_count),
+        "attack_name": _json_safe(attack_name),
+        "attack_active": _json_safe(attack_active),
+        "attack_pr_bias_mean_m": _json_safe(attack_pr_bias_mean_m),
+        "attack_prr_bias_mean_mps": _json_safe(attack_prr_bias_mean_mps),
+    }
+
+
+def run_headless(cfg: SimConfig) -> list[dict[str, Any]]:
+    """Run the live pipeline without plotting and return per-epoch records."""
+    engine = build_engine(cfg)
+    logs: list[dict[str, Any]] = []
+    sim_times = np.arange(0.0, cfg.duration + 1e-9, cfg.dt)
+    attack_name = cfg.attack_name or "none"
+
+    for t_s in sim_times:
+        step = engine.step(float(t_s))
+        logs.append(epoch_to_dict(float(t_s), step, attack_name=attack_name))
+
+    return logs
 
 
 def main() -> None:
@@ -188,7 +273,7 @@ def main() -> None:
 
             while controller.paused and not controller.single_step_requested and not controller.quit_requested:
                 if plotter is not None:
-                    plt.pause(0.05)
+                    plotter.pause(0.05)
                 else:
                     time.sleep(0.05)
 
@@ -197,81 +282,30 @@ def main() -> None:
 
             controller.single_step_requested = False
             step = engine.step(float(t_s))
-            sol = step.get("sol")
-            integrity = step.get("integrity")
-            conops = step.get("conops")
-            attack_report = step.get("attack_report")
+            record = epoch_to_dict(float(t_s), step, attack_name=args.attack_name)
 
-            fix_flags = getattr(sol, "fix_flags", None)
-            dop = getattr(sol, "dop", None)
-            residuals = getattr(sol, "residuals", None)
-
-            fix_valid = getattr(fix_flags, "valid", None)
-            fix_type = getattr(fix_flags, "fix_type", None)
-            sats_used = _as_int(getattr(fix_flags, "sv_count", None))
-            pdop = _as_float(getattr(dop, "pdop", None))
-            residual_rms_m = _as_float(getattr(residuals, "rms_m", None))
-            clk_bias_s = _as_float(getattr(sol, "clk_bias_s", None))
-            clk_drift_sps = _as_float(getattr(sol, "clk_drift_sps", None))
-
-            nis = _as_float(getattr(integrity, "nis", None))
-            is_suspect = bool(getattr(integrity, "is_suspect", False))
-            is_invalid = bool(getattr(integrity, "is_invalid", False))
-            nis_alarm = is_suspect or is_invalid
-            integrity_p_value = _as_float(getattr(integrity, "p_value", None))
-            excluded_sv_ids = getattr(integrity, "excluded_sv_ids", []) or []
-            integrity_excluded_sv_ids_count = len(excluded_sv_ids)
-
-            applied_count = int(getattr(attack_report, "applied_count", 0) or 0)
-            attack_active = applied_count > 0
+            pdop = _as_float(record["pdop"])
+            residual_rms_m = _as_float(record["residual_rms_m"])
+            attack_active = bool(record["attack_active"])
             any_attack_applied = any_attack_applied or attack_active
-            if attack_active:
-                attack_pr_bias_mean_m = _as_float(getattr(attack_report, "pr_bias_sum_m", 0.0)) / applied_count
-                attack_prr_bias_mean_mps = _as_float(getattr(attack_report, "prr_bias_sum_mps", 0.0)) / applied_count
-            else:
-                attack_pr_bias_mean_m = 0.0
-                attack_prr_bias_mean_mps = 0.0
-
-            conops_status = getattr(getattr(conops, "status", None), "value", None)
-            conops_mode5 = getattr(getattr(conops, "mode5", None), "value", None)
 
             print(
                 " ".join(
                     [
                         f"t_s={t_s:.1f}",
-                        f"fix_type={fix_type}",
-                        f"sats_used={sats_used}",
+                        f"fix_type={record['fix_type']}",
+                        f"sats_used={record['sats_used']}",
                         f"pdop={pdop:.3f}" if np.isfinite(pdop) else "pdop=None",
                         f"residual_rms_m={residual_rms_m:.3f}" if np.isfinite(residual_rms_m) else "residual_rms_m=None",
-                        f"nis_alarm={int(nis_alarm)}",
-                        f"conops_status={conops_status}",
-                        f"conops_mode5={conops_mode5}",
+                        f"nis_alarm={int(bool(record['nis_alarm']))}",
+                        f"conops_status={record['conops_status']}",
+                        f"conops_mode5={record['conops_mode5']}",
                         f"attack_active={int(attack_active)}",
                     ]
                 )
             )
 
             if out_fp is not None:
-                record = {
-                    "t_s": _json_safe(float(t_s)),
-                    "fix_valid": _json_safe(fix_valid),
-                    "fix_type": _json_safe(fix_type),
-                    "sats_used": _json_safe(sats_used),
-                    "pdop": _json_safe(pdop),
-                    "residual_rms_m": _json_safe(residual_rms_m),
-                    "clk_bias_s": _json_safe(clk_bias_s),
-                    "clk_drift_sps": _json_safe(clk_drift_sps),
-                    "nis": _json_safe(nis),
-                    "nis_alarm": _json_safe(nis_alarm),
-                    "conops_status": _json_safe(conops_status),
-                    "conops_mode5": _json_safe(conops_mode5),
-                    "integrity_p_value": _json_safe(integrity_p_value),
-                    "integrity_excluded_sv_ids_count": _json_safe(integrity_excluded_sv_ids_count),
-                    "attack_name": _json_safe(args.attack_name),
-                    "attack_active": _json_safe(attack_active),
-                    "attack_pr_bias_mean_m": _json_safe(attack_pr_bias_mean_m),
-                    "attack_prr_bias_mean_mps": _json_safe(attack_prr_bias_mean_mps),
-                }
                 out_fp.write(json.dumps(record) + "\n")
                 out_fp.flush()
 
@@ -280,8 +314,8 @@ def main() -> None:
                     t_s=float(t_s),
                     residual_rms_m=float(residual_rms_m),
                     pdop=float(pdop),
-                    clk_bias_s=float(clk_bias_s),
-                    attack_pr_bias=float(attack_pr_bias_mean_m if attack_active else 0.0),
+                    clk_bias_s=float(_as_float(record["clk_bias_s"])),
+                    attack_pr_bias=float(_as_float(record["attack_pr_bias_mean_m"]) if attack_active else 0.0),
                 )
 
             elapsed = time.perf_counter() - epoch_start
@@ -294,8 +328,7 @@ def main() -> None:
         if out_fp is not None:
             out_fp.close()
         if plotter is not None:
-            plt.ioff()
-            plt.close(plotter.fig)
+            plotter.close()
 
 
 if __name__ == "__main__":
