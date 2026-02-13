@@ -25,6 +25,12 @@ def parse_kv_list(raw_params: list[str]) -> dict[str, Any]:
         if not key:
             raise ValueError("Attack parameter key cannot be empty.")
         params[key] = _parse_kv_value(raw_value)
+
+    if "ramp_rate_mps" not in params and "slope_mps" in params:
+        params["ramp_rate_mps"] = params["slope_mps"]
+    if "end_t" not in params and "t_end" in params:
+        params["end_t"] = params["t_end"]
+
     return params
 
 
