@@ -55,7 +55,8 @@ def wls_solve(
             h_rows.append((-(los / rho)).tolist() + [LIGHT_SPEED])
         observed = np.array(
             [
-                m.pseudorange_m - m.iono_delay_m - m.tropo_delay_m - m.noise_m
+                # Measurement noise is unknown to the receiver, so it must remain in residuals.
+                m.pseudorange_m - m.iono_delay_m - m.tropo_delay_m
                 for m in measurements
             ]
         )
@@ -77,7 +78,8 @@ def wls_solve(
         final_preds.append(rho + LIGHT_SPEED * (clock_bias - meas.sat_clock_bias_s))
     observed = np.array(
         [
-            m.pseudorange_m - m.iono_delay_m - m.tropo_delay_m - m.noise_m
+            # Measurement noise is unknown to the receiver, so it must remain in residuals.
+            m.pseudorange_m - m.iono_delay_m - m.tropo_delay_m
             for m in measurements
         ]
     )
