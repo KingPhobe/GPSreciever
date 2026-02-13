@@ -175,8 +175,7 @@ def _series_or_nan(data: Any, column: str) -> np.ndarray:
 
 def _prepare_output_dir(out_dir: str | Path, run_name: str | None) -> Path:
     root = Path(out_dir)
-    label = run_name or datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    output_dir = root / label
+    output_dir = root if run_name is None else root / run_name
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 
