@@ -63,14 +63,16 @@ python -m sim.live_runner --duration-s 60 --use-ekf --attack-name none
 Spoof ramp example:
 
 ```bash
-python -m sim.live_runner --duration-s 60 --use-ekf --attack-name spoof_pr_ramp --attack-param target_sv=G12 --attack-param start_t=10 --attack-param slope_mps=2
+python -m sim.live_runner --duration-s 60 --use-ekf --attack-name spoof_pr_ramp --attack-param target_sv=G12 --attack-param start_t=10 --attack-param ramp_rate_mps=2
 ```
 
 Headless JSONL export:
 
 ```bash
-python -m sim.live_runner --duration-s 60 --use-ekf --attack-name spoof_pr_ramp --attack-param target_sv=G12 --attack-param start_t=10 --attack-param slope_mps=2 --out-jsonl out/live.jsonl --no-plots
+python -m sim.live_runner --duration-s 60 --use-ekf --attack-name spoof_pr_ramp --attack-param target_sv=G12 --attack-param start_t=10 --attack-param ramp_rate_mps=2 --out-jsonl out/live.jsonl --no-plots
 ```
+
+`slope_mps` is accepted as a deprecated alias for `ramp_rate_mps`.
 
 ## Outputs
 
