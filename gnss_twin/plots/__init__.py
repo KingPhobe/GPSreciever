@@ -105,14 +105,25 @@ def plot_attack_telemetry(data: Any, path: str | Path) -> None:
     prr_bias = _series_or_nan(data, "attack_prr_bias_mean_mps")
 
     fig, ax = plt.subplots(figsize=(9, 4))
-    ax.step(times, attack_active, where="post", label="Attack active (0/1)", color="tab:red")
+    ax_right = ax.twinx()
     ax.plot(times, pr_bias, label="PR bias mean (m)", color="tab:blue")
     ax.plot(times, prr_bias, label="PRR bias mean (m/s)", color="tab:green")
+    ax_right.step(
+        times,
+        attack_active,
+        where="post",
+        label="Attack active (0/1)",
+        color="tab:red",
+    )
     ax.set_title("Attack Telemetry vs Time")
     ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Telemetry")
+    ax.set_ylabel("Bias telemetry")
+    ax_right.set_ylabel("Attack active")
+    ax_right.set_ylim(-0.1, 1.1)
     ax.grid(True, alpha=0.3)
-    ax.legend(loc="best")
+    handles_left, labels_left = ax.get_legend_handles_labels()
+    handles_right, labels_right = ax_right.get_legend_handles_labels()
+    ax.legend(handles_left + handles_right, labels_left + labels_right, loc="best")
     fig.tight_layout()
     fig.savefig(path, dpi=150)
     plt.close(fig)
