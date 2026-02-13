@@ -16,7 +16,7 @@ def test_neo_m8n_output_emits_once_per_second_including_t0():
                 lat_deg=37.0,
                 lon_deg=-122.0,
                 alt_m=10.0,
-                valid=True,
+                raim_valid=True,
                 num_sats=9,
                 hdop=0.8,
                 speed_kn=1.2,
@@ -25,8 +25,9 @@ def test_neo_m8n_output_emits_once_per_second_including_t0():
         )
 
     assert len(emissions) == 8
-    assert sum("$GNGGA" in line for line in emissions) == 4
-    assert sum("$GNRMC" in line for line in emissions) == 4
+    assert sum("$GNGGA" in emit.nmea_sentence for emit in emissions) == 4
+    assert sum("$GNRMC" in emit.nmea_sentence for emit in emissions) == 4
+    assert all(emit.valid == 1 for emit in emissions)
 
 
 def test_neo_m8n_output_sanitizes_satellite_count_and_hdop():
@@ -39,12 +40,13 @@ def test_neo_m8n_output_sanitizes_satellite_count_and_hdop():
         lat_deg=0.0,
         lon_deg=0.0,
         alt_m=0.0,
-        valid=False,
+        raim_valid=False,
         num_sats=-3,
         hdop=float("nan"),
     )
 
     assert len(lines) == 1
     gga = lines[0]
-    assert "$GNGGA" in gga
-    assert ",0,00,99.9," in gga
+    assert "$GNGGA" in gga.nmea_sentence
+    assert ",0,00,99.9," in gga.nmea_sentence
+    assert gga.valid == 0

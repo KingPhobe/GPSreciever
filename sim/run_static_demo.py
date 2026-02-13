@@ -23,7 +23,7 @@ from gnss_twin.models import (
     fix_type_from_label,
 )
 from gnss_twin.meas.pseudorange import SyntheticMeasurementSource
-from gnss_twin.nmea.neo_m8n_output import NeoM8nNmeaOutput
+from gnss_twin.nmea.neo_m8n_output import NmeaEmit, NeoM8nNmeaOutput
 from gnss_twin.integrity.flags import IntegrityConfig, SvTracker, integrity_pvt
 from gnss_twin.receiver.ekf_nav import EkfNav
 from gnss_twin.receiver.gating import postfit_gate
@@ -191,6 +191,7 @@ def build_epoch_log(
         truth=receiver_truth_state,
         t_s=float(t_s),
         fix_valid=sol.fix_flags.valid if sol is not None else None,
+        raim_pass=sol.fix_flags.raim_passed if sol is not None else None,
         fix_type=fix_type_from_label(sol.fix_flags.fix_type) if sol is not None else None,
         sats_used=sol.fix_flags.sv_count if sol is not None else None,
         pdop=sol.dop.pdop if sol is not None else None,
@@ -258,7 +259,7 @@ def run_static_demo(
 
     epochs = []
     nmea = NeoM8nNmeaOutput(rate_hz=1.0, talker="GN")
-    nmea_lines: list[str] = []
+    nmea_emits: list[NmeaEmit] = []
     t0_utc = datetime.now(timezone.utc)
     times = np.arange(0.0, cfg.duration, cfg.dt)
     attack_name = cfg.attack_name or "none"
@@ -275,7 +276,7 @@ def run_static_demo(
         sol = step.get("sol")
         if sol is not None:
             lat_deg, lon_deg, alt_m = ecef_to_lla(*sol.pos_ecef)
-            valid = bool(epoch_log.fix_valid)
+            raim_valid = bool(sol.fix_flags.raim_passed)
             num_sats = int(epoch_log.sats_used or 0)
             hdop = epoch_log.hdop
             if hdop is None and epoch_log.pdop is not None:
@@ -283,17 +284,17 @@ def run_static_demo(
             elif hdop is None:
                 hdop = float("nan")
             t_utc = t0_utc + timedelta(seconds=float(t))
-            lines = nmea.step(
+            emits = nmea.step(
                 float(t),
                 t_utc=t_utc,
                 lat_deg=lat_deg,
                 lon_deg=lon_deg,
                 alt_m=alt_m,
-                valid=valid,
+                raim_valid=raim_valid,
                 num_sats=num_sats,
                 hdop=float(hdop),
             )
-            nmea_lines.extend(lines)
+            nmea_emits.extend(emits)
 
     run_dir.mkdir(parents=True, exist_ok=True)
     if save_figs:
@@ -307,7 +308,25 @@ def run_static_demo(
     save_epochs_npz(output_dir / "epoch_logs.npz", epochs)
     save_epochs_csv(output_dir / "epoch_logs.csv", epochs)
     write_run_table_from_epoch_logs(output_dir / "epoch_logs.csv", output_dir / "run_table.csv", cfg)
-    (output_dir / "nmea_output.nmea").write_text("".join(nmea_lines), encoding="utf-8")
+    (output_dir / "nmea_output.nmea").write_text(
+        "".join(f"{emit.nmea_sentence}\r\n" for emit in nmea_emits),
+        encoding="utf-8",
+    )
+    with (output_dir / "nmea_output.csv").open("w", encoding="utf-8", newline="") as nmea_csv:
+        writer = csv.DictWriter(
+            nmea_csv,
+            fieldnames=["t_s", "t_utc_iso", "valid", "sentence_type", "talker", "nmea_sentence"],
+        )
+        writer.writeheader()
+        for emit in nmea_emits:
+            writer.writerow({
+                "t_s": emit.t_s,
+                "t_utc_iso": emit.t_utc_iso,
+                "valid": emit.valid,
+                "sentence_type": emit.sentence_type,
+                "talker": emit.talker,
+                "nmea_sentence": emit.nmea_sentence,
+            })
     with (output_dir / "run_metadata.csv").open("w", encoding="utf-8", newline="") as metadata_file:
         writer = csv.DictWriter(
             metadata_file,

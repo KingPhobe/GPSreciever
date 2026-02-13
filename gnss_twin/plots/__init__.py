@@ -147,6 +147,7 @@ def epochs_to_frame(epochs: list[EpochLog]) -> Any:
                 "sats_used": _sv_used(epoch),
                 "fix_type": _fix_type_value(epoch),
                 "fix_valid": _fix_valid_value(epoch),
+                "raim_pass": _raim_pass_value(epoch),
                 "attack_name": epoch.attack_name or "",
                 "attack_active": bool(epoch.attack_active),
                 "attack_pr_bias_mean_m": float(epoch.attack_pr_bias_mean_m),
@@ -319,3 +320,9 @@ def _plot_fix_status(times: np.ndarray, fix_type: np.ndarray, fix_valid: np.ndar
     fig.tight_layout()
     fig.savefig(path, dpi=150)
     plt.close(fig)
+
+
+def _raim_pass_value(epoch: EpochLog) -> float:
+    if epoch.solution is None:
+        return float("nan")
+    return 1.0 if epoch.solution.fix_flags.raim_passed else 0.0

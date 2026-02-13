@@ -13,6 +13,7 @@ EPOCH_CSV_COLUMNS = [
     "t",
     "t_s",
     "fix_valid",
+    "raim_pass",
     "fix_type",
     "sats_used",
     "pdop",
@@ -94,6 +95,7 @@ def _epoch_to_csv_line(epoch: EpochLog) -> str:
     residuals = solution.residuals if solution is not None else None
     flags = solution.fix_flags if solution is not None else None
     fix_valid = epoch.fix_valid if epoch.fix_valid is not None else (flags.valid if flags else None)
+    raim_pass = epoch.raim_pass if epoch.raim_pass is not None else (flags.raim_passed if flags else None)
     fix_type = epoch.fix_type if epoch.fix_type is not None else (fix_type_from_label(flags.fix_type) if flags else None)
     if isinstance(fix_type, FixType):
         fix_type_value = int(fix_type)
@@ -106,6 +108,7 @@ def _epoch_to_csv_line(epoch: EpochLog) -> str:
         epoch.t,
         t_s,
         _format_value(fix_valid),
+        _format_value(raim_pass),
         _format_value(fix_type_value),
         _format_value(epoch.sats_used if epoch.sats_used is not None else (flags.sv_count if flags else None)),
         _format_value(epoch.pdop if epoch.pdop is not None else (dop.pdop if dop else None)),
