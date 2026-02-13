@@ -65,6 +65,9 @@ class SyntheticMeasurementSource(MeasurementSource):
 
     _last_t: float | None = field(init=False, default=None)
     _clock_model: RandomWalkClock = field(init=False)
+    _rx_lat_deg: float = field(init=False)
+    _rx_lon_deg: float = field(init=False)
+    _rx_alt_m: float = field(init=False)
     last_attack_report: AttackReport = field(init=False, default_factory=AttackReport)
 
     def __post_init__(self) -> None:
@@ -77,6 +80,12 @@ class SyntheticMeasurementSource(MeasurementSource):
             )
         else:
             self._clock_model = self.clock_model
+
+        # Receiver truth is static in this phase, so cache the LLA conversion.
+        # If receiver_truth becomes dynamic in a future phase, revisit this cache.
+        self._rx_lat_deg, self._rx_lon_deg, self._rx_alt_m = ecef_to_lla(
+            *self.receiver_truth.pos_ecef_m
+        )
 
     @property
     def receiver_clock_bias_s(self) -> float:
@@ -98,7 +107,6 @@ class SyntheticMeasurementSource(MeasurementSource):
         if dt > 0.0:
             self._clock_model.step(dt)
 
-        rx_lat_deg, rx_lon_deg, rx_alt_m = ecef_to_lla(*self.receiver_truth.pos_ecef_m)
         for state in sv_states:
             elev_deg, az_deg = elev_az_from_rx_sv(self.receiver_truth.pos_ecef_m, state.pos_ecef_m)
             if elev_deg < self.elevation_mask_deg:
@@ -116,8 +124,8 @@ class SyntheticMeasurementSource(MeasurementSource):
             )
             iono_delay_m = klobuchar_delay_m(
                 t,
-                rx_lat_deg,
-                rx_lon_deg,
+                self._rx_lat_deg,
+                self._rx_lon_deg,
                 elev_deg,
                 az_deg,
                 alpha=self.iono_alpha,
@@ -125,8 +133,8 @@ class SyntheticMeasurementSource(MeasurementSource):
             )
             tropo_delay_m = saastamoinen_delay_m(
                 elev_deg,
-                rx_lat_deg,
-                rx_alt_m,
+                self._rx_lat_deg,
+                self._rx_alt_m,
                 pressure_hpa=self.pressure_hpa,
                 temp_k=self.temp_k,
                 rel_humidity=self.rel_humidity,
