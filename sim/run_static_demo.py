@@ -15,13 +15,10 @@ from gnss_twin.attacks import AttackPipeline, create_attack
 from gnss_twin.config import SimConfig
 from gnss_twin.logger import save_epochs_csv, save_epochs_npz
 from gnss_twin.models import (
-    DopMetrics,
     EpochLog,
-    FixFlags,
     GnssMeasurement,
     PvtSolution,
     ReceiverTruth,
-    ResidualStats,
     SvState,
     fix_type_from_label,
 )
@@ -222,7 +219,13 @@ def build_epoch_log(
     )
 
 
-def run_static_demo(cfg: SimConfig, run_dir: Path, save_figs: bool = True) -> Path:
+def run_static_demo(
+    cfg: SimConfig,
+    run_dir: Path,
+    save_figs: bool = True,
+    *,
+    verbose: bool = False,
+) -> Path:
     engine, receiver_truth_state = build_engine_with_truth(cfg)
     seed = int(cfg.rng_seed)
     np.random.seed(seed)
@@ -232,73 +235,26 @@ def run_static_demo(cfg: SimConfig, run_dir: Path, save_figs: bool = True) -> Pa
     measurement_source = engine.meas_src
     integrity_checker = engine.integrity_checker
     constellation = measurement_source.constellation
-    dummy_meas = GnssMeasurement(
-        sv_id="G01",
-        t=0.0,
-        pr_m=2.35e7,
-        prr_mps=None,
-        sigma_pr_m=1.0,
-        cn0_dbhz=45.0,
-        elev_deg=30.0,
-        az_deg=120.0,
-        flags={"valid": True},
-    )
-    dummy_sv = SvState(
-        sv_id="G01",
-        t=0.0,
-        pos_ecef_m=np.array([15_600_000.0, 0.0, 21_400_000.0]),
-        vel_ecef_mps=np.array([0.0, 2_600.0, 1_200.0]),
-        clk_bias_s=0.0,
-        clk_drift_sps=0.0,
-    )
-    dummy_solution = PvtSolution(
-        pos_ecef=receiver_truth,
-        vel_ecef=None,
-        clk_bias_s=receiver_clock,
-        clk_drift_sps=0.0,
-        dop=DopMetrics(gdop=2.0, pdop=1.5, hdop=1.0, vdop=1.2),
-        residuals=ResidualStats(rms_m=1.0, mean_m=0.1, max_m=2.5, chi_square=0.8),
-        fix_flags=FixFlags(
-            fix_type="3D",
-            valid=True,
-            sv_used=[dummy_sv.sv_id],
-            sv_rejected=[],
-            sv_count=1,
-            sv_in_view=1,
-            mask_ok=True,
-            pdop=1.5,
-            gdop=2.0,
-            chi_square=0.8,
-            chi_square_threshold=3.8,
-        ),
-    )
-    dummy_truth = receiver_truth_state
-    epoch_log = EpochLog(
-        t=0.0,
-        meas=[dummy_meas],
-        solution=dummy_solution,
-        truth=dummy_truth,
-        per_sv_stats={dummy_sv.sv_id: {"residual_m": 1.0, "used": 1.0, "locked": 0.0}},
-    )
-    print(epoch_log)
-    rx_lat, rx_lon, rx_alt = ecef_to_lla(*receiver_truth)
-    print(f"Receiver LLA (deg, deg, m): ({rx_lat:.6f}, {rx_lon:.6f}, {rx_alt:.2f})")
-    print(f"Receiver ECEF (m): {receiver_truth}")
+    if verbose:
+        rx_lat, rx_lon, rx_alt = ecef_to_lla(*receiver_truth)
+        print(f"Receiver LLA (deg, deg, m): ({rx_lat:.6f}, {rx_lon:.6f}, {rx_alt:.2f})")
+        print(f"Receiver ECEF (m): {receiver_truth}")
 
-    sv_overhead = lla_to_ecef(rx_lat, rx_lon, 20_200_000.0)
-    elev_deg, az_deg = elev_az_from_rx_sv(receiver_truth, sv_overhead)
-    print(f"Sample elevation/azimuth (deg): ({elev_deg:.2f}, {az_deg:.2f})")
+        sv_overhead = lla_to_ecef(rx_lat, rx_lon, 20_200_000.0)
+        elev_deg, az_deg = elev_az_from_rx_sv(receiver_truth, sv_overhead)
+        print(f"Sample elevation/azimuth (deg): ({elev_deg:.2f}, {az_deg:.2f})")
 
-    first_epoch_meas = measurement_source.get_measurements(0.0)
-    print("First-epoch pseudoranges (m):")
-    for meas in first_epoch_meas:
-        print(
-            f"  {meas.sv_id}: {meas.pr_m:.3f} (elev {meas.elev_deg:.2f} deg, cn0 {meas.cn0_dbhz:.1f})"
-        )
-    for t in range(5):
-        sv_states = constellation.get_sv_states(float(t))
-        visible = visible_sv_states(receiver_truth, sv_states, elevation_mask_deg=cfg.elev_mask_deg)
-        print(f"{len(visible)} visible satellites at t={t}s")
+        first_epoch_meas = measurement_source.get_measurements(0.0)
+        print(f"First epoch measurement count: {len(first_epoch_meas)}")
+        print("First-epoch pseudoranges (m):")
+        for meas in first_epoch_meas:
+            print(
+                f"  {meas.sv_id}: {meas.pr_m:.3f} (elev {meas.elev_deg:.2f} deg, cn0 {meas.cn0_dbhz:.1f})"
+            )
+        for t in range(5):
+            sv_states = constellation.get_sv_states(float(t))
+            visible = visible_sv_states(receiver_truth, sv_states, elevation_mask_deg=cfg.elev_mask_deg)
+            print(f"{len(visible)} visible satellites at t={t}s")
 
     epochs = []
     nmea = NeoM8nNmeaOutput(rate_hz=1.0, talker="GN")
@@ -404,6 +360,7 @@ def main() -> None:
         action="store_true",
         help="Disable saving run plots.",
     )
+    parser.add_argument("--verbose", action="store_true", help="Print debug info.")
     args = parser.parse_args()
     attack_params = _parse_attack_params(args.attack_param, args.attack_name)
     cfg = SimConfig(
@@ -415,7 +372,12 @@ def main() -> None:
     )
     run_name = args.run_name or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     run_dir = Path(args.out_dir) / run_name
-    epoch_log_path = run_static_demo(cfg, run_dir, save_figs=not args.no_plots)
+    epoch_log_path = run_static_demo(
+        cfg,
+        run_dir,
+        save_figs=not args.no_plots,
+        verbose=args.verbose,
+    )
     print(f"Saved outputs to {epoch_log_path.parent}")
 
 
