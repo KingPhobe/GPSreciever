@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+import warnings
 
 from gnss_twin.attacks.base import AttackDelta, AttackModel
 from gnss_twin.attacks.jamming import JamCn0DropAttack
@@ -38,22 +39,58 @@ def create_attack(name: str, params: dict) -> AttackModel:
     if lowered == "none":
         return NoOpAttack()
     if lowered == "spoof_clock_ramp":
+        unknown = set(params) - {"start_t", "end_t", "ramp_rate_mps", "slope_mps", "slope", "t_end"}
+        if unknown:
+            warnings.warn(
+                f"Unknown spoof_clock_ramp attack params: {sorted(unknown)}",
+                stacklevel=2,
+            )
+        if "ramp_rate_mps" in params:
+            ramp_rate_mps = float(params["ramp_rate_mps"])
+        elif "slope_mps" in params:
+            ramp_rate_mps = float(params["slope_mps"])
+        elif "slope" in params:
+            ramp_rate_mps = float(params["slope"])
+        else:
+            ramp_rate_mps = 1.0
+        end_t = params.get("end_t", params.get("t_end"))
         return SpoofClockRampAttack(
             start_t=float(params.get("start_t", 20.0)),
-            end_t=(float(params["end_t"]) if "end_t" in params else None),
-            ramp_rate_mps=float(params.get("ramp_rate_mps", 1.0)),
+            end_t=(float(end_t) if end_t is not None else None),
+            ramp_rate_mps=ramp_rate_mps,
         )
     if lowered == "spoof_pr_ramp":
+        unknown = set(params) - {"start_t", "end_t", "ramp_rate_mps", "target_sv", "slope_mps", "slope", "t_end"}
+        if unknown:
+            warnings.warn(
+                f"Unknown spoof_pr_ramp attack params: {sorted(unknown)}",
+                stacklevel=2,
+            )
         target_sv = str(params.get("target_sv", "")).strip()
         if not target_sv:
             raise ValueError("spoof_pr_ramp requires target_sv to be provided")
+        if "ramp_rate_mps" in params:
+            ramp_rate_mps = float(params["ramp_rate_mps"])
+        elif "slope_mps" in params:
+            ramp_rate_mps = float(params["slope_mps"])
+        elif "slope" in params:
+            ramp_rate_mps = float(params["slope"])
+        else:
+            ramp_rate_mps = 1.0
+        end_t = params.get("end_t", params.get("t_end"))
         return SpoofPrRampAttack(
             start_t=float(params.get("start_t", 20.0)),
-            end_t=(float(params["end_t"]) if "end_t" in params else None),
-            ramp_rate_mps=float(params.get("ramp_rate_mps", 1.0)),
+            end_t=(float(end_t) if end_t is not None else None),
+            ramp_rate_mps=ramp_rate_mps,
             target_sv=target_sv,
         )
     if lowered == "jam_cn0_drop":
+        unknown = set(params) - {"start_t", "cn0_drop_db", "sigma_pr_scale", "sigma_prr_scale"}
+        if unknown:
+            warnings.warn(
+                f"Unknown jam_cn0_drop attack params: {sorted(unknown)}",
+                stacklevel=2,
+            )
         return JamCn0DropAttack(
             start_t=float(params.get("start_t", 20.0)),
             cn0_drop_db=float(params.get("cn0_drop_db", 15.0)),

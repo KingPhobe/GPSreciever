@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import random
+import warnings
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -427,6 +428,15 @@ def _parse_attack_params(raw_params: list[str], attack_name: str) -> dict[str, f
         if not key:
             raise ValueError("Attack parameter key cannot be empty.")
         params[key] = _coerce_param_value(value)
+
+    if "ramp_rate_mps" not in params:
+        if "slope_mps" in params:
+            warnings.warn("Deprecated attack param slope_mps; use ramp_rate_mps", stacklevel=2)
+            params["ramp_rate_mps"] = float(params["slope_mps"])
+        elif "slope" in params:
+            warnings.warn("Deprecated attack param slope; use ramp_rate_mps", stacklevel=2)
+            params["ramp_rate_mps"] = float(params["slope"])
+
     if attack_name.lower() == "spoof_pr_ramp":
         target_sv = params.get("target_sv")
         if not target_sv or str(target_sv).strip() == "":
