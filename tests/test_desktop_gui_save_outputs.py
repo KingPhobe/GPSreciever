@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 
 import pytest
@@ -61,6 +62,19 @@ def test_save_outputs_generates_full_plot_set(tmp_path: Path, monkeypatch: pytes
         "attack_telemetry.png",
     }
     assert expected_files.issubset({p.name for p in run_dir.iterdir()})
+    with (run_dir / "run_table.csv").open("r", encoding="utf-8", newline="") as handle:
+        header = next(csv.reader(handle))
+    for expected_column in [
+        "nmea_enabled",
+        "nmea_profile",
+        "nmea_rate_hz",
+        "nmea_msgs",
+        "nmea_talker",
+        "rx_lat_deg",
+        "rx_lon_deg",
+        "rx_alt_m",
+    ]:
+        assert expected_column in header
 
 
 def test_save_outputs_uses_unique_directory_on_collision(

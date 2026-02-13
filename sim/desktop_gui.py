@@ -42,6 +42,7 @@ from gnss_twin.plots import epochs_to_frame, plot_update
 from gnss_twin.sat.simple_gps import SimpleGpsConfig, SimpleGpsConstellation
 from gnss_twin.utils.angles import elev_az_from_rx_sv
 from gnss_twin.utils.wgs84 import ecef_to_lla
+from sim.run_table import add_nmea_metadata_columns
 from sim.run_static_demo import build_engine_with_truth, build_epoch_log
 
 
@@ -735,6 +736,9 @@ class MainWindow(QMainWindow):
             df["attack_target_sv"] = target_sv
             df["attack_config_ok"] = bool(self.attack_config_ok)
             df["attack_config_msg"] = self.attack_config_msg
+            add_nmea_metadata_columns(df, self.cfg)
+        else:
+            add_nmea_metadata_columns(df, SimConfig())
         self.frame = df
         df.to_csv(run_dir / "run_table.csv", index=False)
         plot_update(df, out_dir=run_dir, run_name=None)

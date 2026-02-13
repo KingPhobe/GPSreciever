@@ -40,6 +40,7 @@ from gnss_twin.sat.simple_gps import SimpleGpsConfig, SimpleGpsConstellation
 from gnss_twin.sat.visibility import visible_sv_states
 from gnss_twin.utils.angles import elev_az_from_rx_sv
 from gnss_twin.utils.wgs84 import ecef_to_lla, lla_to_ecef
+from sim.run_table import write_run_table_from_epoch_logs
 
 
 class _DemoSolver:
@@ -348,6 +349,7 @@ def run_static_demo(cfg: SimConfig, run_dir: Path, save_figs: bool = True) -> Pa
         output_dir = run_dir
     save_epochs_npz(output_dir / "epoch_logs.npz", epochs)
     save_epochs_csv(output_dir / "epoch_logs.csv", epochs)
+    write_run_table_from_epoch_logs(output_dir / "epoch_logs.csv", output_dir / "run_table.csv", cfg)
     (output_dir / "nmea_output.nmea").write_text("".join(nmea_lines), encoding="utf-8")
     with (output_dir / "run_metadata.csv").open("w", encoding="utf-8", newline="") as metadata_file:
         writer = csv.DictWriter(
