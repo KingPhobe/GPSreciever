@@ -4,6 +4,12 @@ from gnss_twin.utils.angles import elev_az_from_rx_sv
 from gnss_twin.utils.wgs84 import ecef_to_lla, lla_to_ecef
 
 
+def test_lla_to_ecef_is_finite() -> None:
+    ecef = lla_to_ecef(36.597383, -121.874300, 14.0)
+    assert ecef.shape == (3,)
+    assert np.all(np.isfinite(ecef))
+
+
 def test_lla_ecef_roundtrip() -> None:
     lat_deg = 37.4275
     lon_deg = -122.1697

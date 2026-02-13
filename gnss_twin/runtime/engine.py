@@ -285,7 +285,7 @@ class Engine:
 
     def __init__(self, cfg: SimConfig) -> None:
         self.cfg = cfg
-        self.receiver_lla = (37.4275, -122.1697, 30.0)
+        self.receiver_lla = (cfg.rx_lat_deg, cfg.rx_lon_deg, cfg.rx_alt_m)
         self.receiver_truth_ecef = lla_to_ecef(*self.receiver_lla)
         self.receiver_clock = 4.2e-6
         self.receiver_truth = ReceiverTruth(
