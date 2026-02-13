@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import subprocess
 import sys
 from pathlib import Path
@@ -45,3 +46,23 @@ def test_rng_seed_cli_writes_nmea_and_metadata(tmp_path: Path) -> None:
     assert "GNGGA" in nmea_text
     assert "GNRMC" in nmea_text
     assert metadata_path.exists()
+
+
+def test_rng_seed_cli_run_table_contains_nmea_metadata_columns(tmp_path: Path) -> None:
+    run_dir = _run_demo(tmp_path, "run_table")
+    run_table_path = run_dir / "run_table.csv"
+
+    with run_table_path.open("r", encoding="utf-8", newline="") as handle:
+        header = next(csv.reader(handle))
+
+    for expected_column in [
+        "nmea_enabled",
+        "nmea_profile",
+        "nmea_rate_hz",
+        "nmea_msgs",
+        "nmea_talker",
+        "rx_lat_deg",
+        "rx_lon_deg",
+        "rx_alt_m",
+    ]:
+        assert expected_column in header
