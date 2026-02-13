@@ -12,6 +12,9 @@ class SimConfig:
     rng_seed: int = 42
     dt: float = 1.0
     duration: float = 60.0
+    rx_lat_deg: float = 36.597383
+    rx_lon_deg: float = -121.874300
+    rx_alt_m: float = 14.0
     elev_mask_deg: float = 10.0
     enable_tracking_placeholder: bool = True
     cn0_lock_on_dbhz: float = 30.0
