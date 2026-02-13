@@ -8,8 +8,8 @@ import pytest
 from gnss_twin.config import SimConfig
 from gnss_twin.logger import load_epochs_npz
 from gnss_twin.plots import epochs_to_frame, plot_update
+from sim.run_static_demo import build_engine_with_truth, build_epoch_log, run_static_demo
 from sim.run_static_demo import run_static_demo
-
 
 def test_demo_outputs_and_log_reload(tmp_path: Path) -> None:
     pytest.importorskip("pandas")
@@ -57,8 +57,18 @@ def test_epochs_to_frame_includes_attack_columns(tmp_path: Path) -> None:
         attack_name="spoof_clock_ramp",
         attack_params={"start_t": 0.0, "ramp_rate_mps": 10.0},
     )
-    epoch_log_path = run_static_demo(cfg, tmp_path / "attack_frame", save_figs=False)
-    epochs = load_epochs_npz(epoch_log_path)
+    engine, truth = build_engine_with_truth(cfg)
+    epochs = []
+    for t_s in [0.0, 1.0, 2.0]:
+        step = engine.step(t_s)
+        epoch = build_epoch_log(
+            t_s=t_s,
+            step_out=step,
+            receiver_truth_state=truth,
+            integrity_checker=engine.integrity_checker,
+            attack_name=cfg.attack_name or "none",
+        )
+        epochs.append(epoch)
     frame = epochs_to_frame(epochs)
 
     for column in [
