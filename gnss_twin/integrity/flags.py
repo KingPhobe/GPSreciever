@@ -180,6 +180,7 @@ def integrity_pvt(
         gdop=dop.gdop,
         chi_square=residual_stats.chi_square,
         chi_square_threshold=chi_square_threshold,
+        raim_passed=raim_passed,
     )
     return _solution_from_wls(solution, residual_stats, fix_flags), per_sv_stats
 
@@ -216,6 +217,7 @@ def _no_fix_solution(sv_in_view: int, mask_ok: bool) -> PvtSolution:
         gdop=float("nan"),
         chi_square=float("nan"),
         chi_square_threshold=float("inf"),
+        raim_passed=False,
     )
     return PvtSolution(
         pos_ecef=nan_vec,

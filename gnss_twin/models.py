@@ -83,6 +83,7 @@ class FixFlags:
     gdop: float
     chi_square: float
     chi_square_threshold: float
+    raim_passed: bool
 
 
 class FixType(IntEnum):
@@ -129,6 +130,7 @@ class EpochLog:
     truth: ReceiverTruth | None
     t_s: float | None = None
     fix_valid: bool | None = None
+    raim_pass: bool | None = None
     fix_type: FixType | int | None = None
     sats_used: int | None = None
     pdop: float | None = None

@@ -467,6 +467,7 @@ class Engine:
             truth=self.receiver_truth,
             t_s=float(t),
             fix_valid=fix_valid,
+            raim_pass=solution.fix_flags.raim_passed if solution is not None else None,
             fix_type=fix_type,
             sats_used=solution.fix_flags.sv_count if solution is not None else None,
             pdop=dop.pdop if dop is not None else None,

@@ -60,6 +60,7 @@ def test_dataclass_fields() -> None:
         "truth",
         "t_s",
         "fix_valid",
+        "raim_pass",
         "fix_type",
         "sats_used",
         "pdop",
@@ -98,6 +99,7 @@ def test_dataclass_fields() -> None:
         "gdop",
         "chi_square",
         "chi_square_threshold",
+        "raim_passed",
     ]
 
 
@@ -153,6 +155,7 @@ class DummySolver(NavSolver):
                 gdop=float("nan"),
                 chi_square=float("nan"),
                 chi_square_threshold=float("inf"),
+                raim_passed=False,
             ),
         )
 

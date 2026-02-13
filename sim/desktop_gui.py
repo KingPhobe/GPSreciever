@@ -37,7 +37,7 @@ from PyQt6.QtWidgets import (
 
 from gnss_twin.config import SimConfig
 from gnss_twin.models import EpochLog, ReceiverTruth
-from gnss_twin.nmea.neo_m8n_output import NeoM8nNmeaOutput
+from gnss_twin.nmea.neo_m8n_output import NmeaEmit, NeoM8nNmeaOutput
 from gnss_twin.plots import epochs_to_frame, plot_update
 from gnss_twin.sat.simple_gps import SimpleGpsConfig, SimpleGpsConstellation
 from gnss_twin.utils.angles import elev_az_from_rx_sv
@@ -226,8 +226,8 @@ class MainWindow(QMainWindow):
         self.nmea_enabled = True
         self.nmea = NeoM8nNmeaOutput(rate_hz=1.0, talker="GN")
         self.nmea_t0_utc = datetime.now(timezone.utc)
-        self.nmea_buffer: list[str] = []
-        self.nmea_recent: deque[str] = deque(maxlen=200)
+        self.nmea_buffer: list[NmeaEmit] = []
+        self.nmea_recent: deque[NmeaEmit] = deque(maxlen=200)
         self.last_nmea_preview_update_walltime = 0.0
 
         self.timer = QTimer(self)
@@ -597,7 +597,7 @@ class MainWindow(QMainWindow):
         if sol is None:
             return
         lat_deg, lon_deg, alt_m = ecef_to_lla(*sol.pos_ecef)
-        valid = bool(epoch.fix_valid)
+        raim_valid = bool(sol.fix_flags.raim_passed)
         num_sats = int(epoch.sats_used or 0)
         hdop = epoch.hdop
         if hdop is None and epoch.pdop is not None:
@@ -611,7 +611,7 @@ class MainWindow(QMainWindow):
             lat_deg=lat_deg,
             lon_deg=lon_deg,
             alt_m=alt_m,
-            valid=valid,
+            raim_valid=raim_valid,
             num_sats=num_sats,
             hdop=float(hdop),
         )
@@ -626,7 +626,7 @@ class MainWindow(QMainWindow):
             return
         self.last_nmea_preview_update_walltime = now
         recent_lines = list(self.nmea_recent)[-NMEA_PREVIEW_LINES:]
-        self.nmea_preview.setPlainText("".join(recent_lines))
+        self.nmea_preview.setPlainText("".join(f"{emit.nmea_sentence}\n" for emit in recent_lines))
 
     def _update_status_labels(self, epoch: EpochLog | None = None) -> None:
         values = {
@@ -742,7 +742,25 @@ class MainWindow(QMainWindow):
         self.frame = df
         df.to_csv(run_dir / "run_table.csv", index=False)
         plot_update(df, out_dir=run_dir, run_name=None)
-        (run_dir / "nmea_output.nmea").write_text("".join(self.nmea_buffer), encoding="utf-8")
+        (run_dir / "nmea_output.nmea").write_text(
+            "".join(f"{emit.nmea_sentence}\r\n" for emit in self.nmea_buffer),
+            encoding="utf-8",
+        )
+        with (run_dir / "nmea_output.csv").open("w", encoding="utf-8", newline="") as nmea_csv:
+            writer = csv.DictWriter(
+                nmea_csv,
+                fieldnames=["t_s", "t_utc_iso", "valid", "sentence_type", "talker", "nmea_sentence"],
+            )
+            writer.writeheader()
+            for emit in self.nmea_buffer:
+                writer.writerow({
+                    "t_s": emit.t_s,
+                    "t_utc_iso": emit.t_utc_iso,
+                    "valid": emit.valid,
+                    "sentence_type": emit.sentence_type,
+                    "talker": emit.talker,
+                    "nmea_sentence": emit.nmea_sentence,
+                })
         with (run_dir / "run_metadata.csv").open("w", encoding="utf-8", newline="") as metadata_file:
             writer = csv.DictWriter(
                 metadata_file,

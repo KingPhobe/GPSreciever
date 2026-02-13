@@ -169,3 +169,31 @@ def test_integrity_raim_many_bad_invalid() -> None:
         config=config,
     )
     assert not solution.fix_flags.valid
+
+
+def test_integrity_raim_flag_matches_chi_square_threshold() -> None:
+    rng = np.random.default_rng(9)
+    constellation = SimpleGpsConstellation(SimpleGpsConfig(seed=13))
+    receiver_pos = lla_to_ecef(34.0, -118.0, 50.0)
+    sv_states = visible_sv_states(receiver_pos, constellation.get_sv_states(0.0), elevation_mask_deg=5.0)
+    measurements = _make_measurements(
+        receiver_pos,
+        1.0e-6,
+        np.zeros(3),
+        0.0,
+        sv_states,
+        rng,
+        noise_sigma_m=0.5,
+    )
+    target_idx = int(np.argmax([meas.elev_deg for meas in measurements]))
+    measurements[target_idx] = replace(measurements[target_idx], pr_m=measurements[target_idx].pr_m + 90.0)
+
+    solution, _ = integrity_pvt(
+        measurements,
+        sv_states,
+        initial_pos_ecef_m=receiver_pos + 50.0,
+        config=IntegrityConfig(max_fde_iterations=0, elevation_mask_deg=0.0),
+    )
+
+    expected_raim_pass = bool(solution.fix_flags.chi_square <= solution.fix_flags.chi_square_threshold)
+    assert solution.fix_flags.raim_passed == expected_raim_pass
