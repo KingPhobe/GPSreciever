@@ -1,5 +1,6 @@
 """NMEA sentence formatting utilities."""
 
+from .neo_m8n_output import NeoM8nNmeaOutput
 from .nmea_formatter import (
     build_gga,
     build_rmc,
@@ -20,4 +21,5 @@ __all__ = [
     "format_date_ddmmyy",
     "build_gga",
     "build_rmc",
+    "NeoM8nNmeaOutput",
 ]
