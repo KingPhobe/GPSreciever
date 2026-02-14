@@ -51,6 +51,14 @@ PDOP_OK = 6.0
 DIAG_UPDATE_PERIOD_S = 0.3
 NMEA_PREVIEW_UPDATE_PERIOD_S = 0.2
 NMEA_PREVIEW_LINES = 10
+RUN_TABLE_INTEGRITY_COLUMNS: dict[str, object] = {
+    "integrity_p_value": float("nan"),
+    "integrity_num_sats_used": float("nan"),
+    "integrity_excluded_sv_ids_count": float("nan"),
+    "conops_reason_codes": "",
+    "nis": float("nan"),
+    "nis_alarm": False,
+}
 
 
 def _date_folder_str() -> str:
@@ -725,6 +733,9 @@ class MainWindow(QMainWindow):
         run_dir.mkdir(parents=True, exist_ok=False)
 
         df = epochs_to_frame(self.epochs)
+        for column, default_value in RUN_TABLE_INTEGRITY_COLUMNS.items():
+            if column not in df.columns:
+                df[column] = default_value
         if self.cfg is not None:
             attack_name = self.cfg.attack_name or "none"
             attack_params = self.cfg.attack_params

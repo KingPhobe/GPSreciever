@@ -145,6 +145,7 @@ def epochs_to_frame(epochs: list[EpochLog]) -> Any:
         solution = epoch.solution
         pos_error = _position_error(epoch)
         dop = _dop_vector(epoch)
+        conops_reason_codes = "|".join(epoch.conops_reason_codes)
         payload.append(
             {
                 "t_s": epoch.t_s if epoch.t_s is not None else epoch.t,
@@ -159,6 +160,24 @@ def epochs_to_frame(epochs: list[EpochLog]) -> Any:
                 "fix_type": _fix_type_value(epoch),
                 "fix_valid": _fix_valid_value(epoch),
                 "raim_pass": _raim_pass_value(epoch),
+                "nis": float(epoch.nis) if epoch.nis is not None else float("nan"),
+                "nis_alarm": bool(epoch.nis_alarm),
+                "conops_reason_codes": conops_reason_codes,
+                "integrity_p_value": (
+                    float(epoch.integrity_p_value)
+                    if epoch.integrity_p_value is not None
+                    else float("nan")
+                ),
+                "integrity_num_sats_used": (
+                    float(epoch.integrity_num_sats_used)
+                    if epoch.integrity_num_sats_used is not None
+                    else float("nan")
+                ),
+                "integrity_excluded_sv_ids_count": (
+                    float(epoch.integrity_excluded_sv_ids_count)
+                    if epoch.integrity_excluded_sv_ids_count is not None
+                    else float("nan")
+                ),
                 "attack_name": epoch.attack_name or "",
                 "attack_active": bool(epoch.attack_active),
                 "attack_pr_bias_mean_m": float(epoch.attack_pr_bias_mean_m),
