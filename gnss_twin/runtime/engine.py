@@ -18,7 +18,7 @@ from gnss_twin.integrity.raim import chi2_threshold, compute_raim
 from gnss_twin.meas.pseudorange import SyntheticMeasurementSource
 from gnss_twin.models import EpochLog, PvtSolution, ReceiverTruth, fix_type_from_label
 from gnss_twin.receiver.ekf_nav import EkfNav
-from gnss_twin.receiver.gating import postfit_gate, prefit_filter
+from gnss_twin.receiver.gating import prefit_filter
 from gnss_twin.receiver.tracking_state import TrackingState
 from gnss_twin.receiver.wls_pvt import WlsPvtResult, wls_pvt
 from gnss_twin.runtime.state_machine import ConopsStateMachine
@@ -369,22 +369,6 @@ class Engine:
                 initial_pos_ecef_m=self.last_pos,
                 initial_clk_bias_s=self.last_clk,
             )
-            if wls_solution is not None:
-                sigmas_by_sv = {m.sv_id: m.sigma_pr_m for m in used_meas}
-                offender = postfit_gate(
-                    wls_solution.residuals_m,
-                    sigmas_by_sv,
-                    gate=self.cfg.postfit_gate_sigma,
-                )
-                if offender:
-                    used_meas = [m for m in used_meas if m.sv_id != offender]
-                    if len(used_meas) >= 4:
-                        wls_solution = wls_pvt(
-                            used_meas,
-                            sv_states,
-                            initial_pos_ecef_m=self.last_pos,
-                            initial_clk_bias_s=self.last_clk,
-                        )
         tracking_states = self.tracking_state.update(meas)
 
         solution, per_sv_stats = integrity_pvt(
@@ -396,6 +380,8 @@ class Engine:
             tracker=self.tracker,
             precomputed=wls_solution,
         )
+        integrity_used_sv = set(solution.fix_flags.sv_used)
+        ekf_meas = [meas for meas in used_meas if meas.sv_id in integrity_used_sv]
         nis = None
         innov_dim = None
         nis_pr: float | None = None
@@ -411,14 +397,14 @@ class Engine:
                 self.ekf.predict(dt)
             if self.ekf.initialized:
                 self.ekf.update_pseudorange(
-                    used_meas,
+                    ekf_meas,
                     sv_states,
                     initial_pos_ecef_m=self.last_pos,
                     initial_clk_bias_s=self.last_clk,
                 )
                 nis_pr = self.ekf.last_nis
                 innov_dim_pr = self.ekf.last_innov_dim
-                self.ekf.update_prr(used_meas, sv_states)
+                self.ekf.update_prr(ekf_meas, sv_states)
                 nis_prr = self.ekf.last_nis
                 innov_dim_prr = self.ekf.last_innov_dim
                 nis_candidates = [

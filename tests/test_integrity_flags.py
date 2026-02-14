@@ -94,6 +94,40 @@ def test_integrity_rejects_outlier() -> None:
     assert not baseline_solution.fix_flags.valid
 
 
+def test_integrity_single_sv_bias_exclusion_converges_to_attacked_sv() -> None:
+    rng = np.random.default_rng(123)
+    constellation = SimpleGpsConstellation(SimpleGpsConfig(seed=123))
+    receiver_pos = lla_to_ecef(36.0, -115.0, 50.0)
+    sv_states = visible_sv_states(receiver_pos, constellation.get_sv_states(0.0), elevation_mask_deg=5.0)
+    measurements = _make_measurements(
+        receiver_pos,
+        1.0e-6,
+        np.zeros(3),
+        0.0,
+        sv_states,
+        rng,
+        noise_sigma_m=0.5,
+    )
+
+    attacked_idx = int(np.argmax([meas.elev_deg for meas in measurements]))
+    attacked_sv = measurements[attacked_idx].sv_id
+    measurements[attacked_idx] = replace(
+        measurements[attacked_idx],
+        pr_m=measurements[attacked_idx].pr_m + 160.0,
+    )
+
+    solution, _ = integrity_pvt(
+        measurements,
+        sv_states,
+        initial_pos_ecef_m=receiver_pos + 50.0,
+        config=IntegrityConfig(max_fde_iterations=2, elevation_mask_deg=0.0),
+    )
+
+    assert attacked_sv in solution.fix_flags.sv_rejected
+    assert attacked_sv not in solution.fix_flags.sv_used
+    assert len(solution.fix_flags.sv_rejected) <= 2
+    assert len(solution.fix_flags.sv_used) >= 4
+
 def test_integrity_pdop_threshold_invalid() -> None:
     rng = np.random.default_rng(3)
     constellation = SimpleGpsConstellation(SimpleGpsConfig(seed=21))

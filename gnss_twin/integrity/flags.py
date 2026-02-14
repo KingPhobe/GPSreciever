@@ -22,7 +22,7 @@ class IntegrityConfig:
     gdop_max: float = 8.0
     vdop_max: float = 10.0
     chi_square_alpha: float = 0.01
-    max_residual_m: float = 12.0
+    max_residual_m: float = 25.0
     max_fde_iterations: int = 2
     cn0_track_dbhz: float = 30.0
     cn0_continuity_dbhz: float = 28.0
@@ -105,40 +105,16 @@ def integrity_pvt(
     raim_threshold = float("inf")
     raim_passed = False
     iteration = 0
-    should_solve = True
     if _matches_used_set(precomputed, used):
-        should_solve = False
         solution = precomputed
-        residuals_by_sv = solution.residuals_m
-        if not residuals_by_sv:
-            raim_passed = True
-        else:
-            sigmas_by_sv = {meas.sv_id: meas.sigma_pr_m for meas in used}
-            raim_stat, raim_dof, raim_threshold, raim_passed = compute_raim(
-                residuals_by_sv,
-                sigmas_by_sv,
-                num_states=4,
-                alpha=cfg.chi_square_alpha,
+    while True:
+        if solution is None:
+            solution = wls_pvt(
+                used,
+                sv_states,
+                initial_pos_ecef_m=initial_pos_ecef_m,
+                initial_clk_bias_s=initial_clk_bias_s,
             )
-        if not raim_passed and iteration < cfg.max_fde_iterations:
-            worst_sv, _ = max(
-                residuals_by_sv.items(),
-                key=lambda item: abs(item[1])
-                / max(float(sigmas_by_sv.get(item[0], 0.0)), 1e-3),
-            )
-            rejected.append(worst_sv)
-            used = [meas for meas in used if meas.sv_id != worst_sv]
-            if len(used) < 4:
-                return _no_fix_solution(len(measurements), mask_ok, "insufficient_sv_after_fde"), per_sv_stats
-            iteration += 1
-            should_solve = True
-    while should_solve:
-        solution = wls_pvt(
-            used,
-            sv_states,
-            initial_pos_ecef_m=initial_pos_ecef_m,
-            initial_clk_bias_s=initial_clk_bias_s,
-        )
         if solution is None:
             return _no_fix_solution(len(measurements), mask_ok, "solver_failed"), per_sv_stats
         residuals_by_sv = solution.residuals_m
@@ -152,18 +128,30 @@ def integrity_pvt(
             num_states=4,
             alpha=cfg.chi_square_alpha,
         )
-        if raim_passed or iteration >= cfg.max_fde_iterations:
-            break
-        worst_sv, _ = max(
-            residuals_by_sv.items(),
-            key=lambda item: abs(item[1])
-            / max(float(sigmas_by_sv.get(item[0], 0.0)), 1e-3),
+        current_max_residual = _max_abs_residual(residuals_by_sv)
+        needs_fde = (not raim_passed) or (
+            np.isfinite(current_max_residual) and current_max_residual > cfg.max_residual_m
         )
-        rejected.append(worst_sv)
-        used = [meas for meas in used if meas.sv_id != worst_sv]
+        if (not needs_fde) or iteration >= cfg.max_fde_iterations:
+            break
+
+        fde_choice = _choose_fde_exclusion_candidate(
+            used,
+            sv_states,
+            cfg,
+            current_solution=solution,
+            fallback_pos_ecef_m=initial_pos_ecef_m,
+            fallback_clk_bias_s=initial_clk_bias_s,
+        )
+        if fde_choice is None:
+            break
+        rejected_sv, reduced_solution = fde_choice
+        rejected.append(rejected_sv)
+        used = [meas for meas in used if meas.sv_id != rejected_sv]
         if len(used) < 4:
             return _no_fix_solution(len(measurements), mask_ok, "insufficient_sv_after_fde"), per_sv_stats
         iteration += 1
+        solution = reduced_solution
 
     residual_stats = _compute_residual_stats(used, residuals_by_sv)
     chi_square_threshold = raim_threshold if np.isfinite(raim_threshold) else _chi_square_threshold(
@@ -314,3 +302,52 @@ def _matches_used_set(precomputed: WlsPvtResult | None, used: list[GnssMeasureme
         return False
     used_sv_ids = {meas.sv_id for meas in used}
     return bool(used_sv_ids) and set(precomputed.residuals_m) == used_sv_ids
+
+
+def _choose_fde_exclusion_candidate(
+    used: list[GnssMeasurement],
+    sv_states: list[SvState],
+    cfg: IntegrityConfig,
+    *,
+    current_solution: WlsPvtResult,
+    fallback_pos_ecef_m: np.ndarray | None,
+    fallback_clk_bias_s: float,
+) -> tuple[str, WlsPvtResult] | None:
+    """Choose FDE exclusion via leave-one-out subset RAIM score."""
+
+    best_choice: tuple[float, float, float, str, WlsPvtResult] | None = None
+    for candidate in used:
+        subset = [meas for meas in used if meas.sv_id != candidate.sv_id]
+        if len(subset) < 4:
+            continue
+        subset_solution = wls_pvt(
+            subset,
+            sv_states,
+            initial_pos_ecef_m=current_solution.pos_ecef_m if current_solution is not None else fallback_pos_ecef_m,
+            initial_clk_bias_s=current_solution.clk_bias_s if current_solution is not None else fallback_clk_bias_s,
+        )
+        if subset_solution is None:
+            continue
+        subset_residuals = subset_solution.residuals_m
+        subset_sigmas = {meas.sv_id: meas.sigma_pr_m for meas in subset}
+        subset_stat, _, _, subset_passed = compute_raim(
+            subset_residuals,
+            subset_sigmas,
+            num_states=4,
+            alpha=cfg.chi_square_alpha,
+        )
+        pass_rank = 0.0 if subset_passed else 1.0
+        score = subset_stat if np.isfinite(subset_stat) else float("inf")
+        residual_rank = _max_abs_residual(subset_residuals)
+        current = (pass_rank, score, residual_rank, candidate.sv_id, subset_solution)
+        if best_choice is None or current[:3] < best_choice[:3]:
+            best_choice = current
+    if best_choice is None:
+        return None
+    return best_choice[3], best_choice[4]
+
+
+def _max_abs_residual(residuals_by_sv: Mapping[str, float]) -> float:
+    if not residuals_by_sv:
+        return float("nan")
+    return float(np.max(np.abs(np.asarray(list(residuals_by_sv.values()), dtype=float))))
