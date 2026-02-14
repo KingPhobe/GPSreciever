@@ -17,6 +17,7 @@ def _app():
     return app
 
 
+@pytest.mark.gui
 def test_save_outputs_generates_full_plot_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _app()
     gui = pytest.importorskip("sim.desktop_gui")
@@ -83,6 +84,7 @@ def test_save_outputs_generates_full_plot_set(tmp_path: Path, monkeypatch: pytes
         assert expected_column in header
 
 
+@pytest.mark.gui
 def test_save_outputs_uses_unique_directory_on_collision(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

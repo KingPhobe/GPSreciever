@@ -8,6 +8,7 @@ from sim.validation.phase3 import has_required_columns, run_phase3_scenarios
 
 @pytest.mark.slow
 @pytest.mark.integration
+@pytest.mark.regression
 def test_phase3_attack_regression(tmp_path) -> None:
     results = run_phase3_scenarios(run_root=tmp_path / "phase3", duration_s=20.0, seed=123)
 
