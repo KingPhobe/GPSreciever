@@ -11,6 +11,7 @@ def _app():
     return app
 
 
+@pytest.mark.gui
 def test_main_window_defaults_to_flags_plot_only() -> None:
     _app()
     gui = pytest.importorskip("sim.desktop_gui")
@@ -21,6 +22,7 @@ def test_main_window_defaults_to_flags_plot_only() -> None:
     assert window.figure.axes == [window.ax_flags]
 
 
+@pytest.mark.gui
 def test_diagnostics_window_created_on_demand() -> None:
     _app()
     gui = pytest.importorskip("sim.desktop_gui")

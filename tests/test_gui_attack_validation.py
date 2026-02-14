@@ -6,6 +6,7 @@ from gnss_twin.config import SimConfig
 from sim.run_static_demo import build_engine_with_truth
 
 
+@pytest.mark.gui
 def test_visible_svs_non_empty_and_supports_non_visible_choice() -> None:
     pytest.importorskip("PyQt6.QtWidgets")
     gui = pytest.importorskip("sim.desktop_gui")
