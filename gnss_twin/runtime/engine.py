@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import inspect
 from typing import Any, Callable, Protocol
 
 import numpy as np
@@ -201,7 +202,30 @@ class SimulationEngine:
         receiver_truth = getattr(self.meas_src, "receiver_truth", None)
         if not isinstance(receiver_truth, ReceiverTruth):
             return measurements, None
-        return self.attack_pipeline.apply(measurements, sv_states, rx_truth=receiver_truth)
+        self._sync_attack_pipeline_time(measurements)
+        return _call_attack_pipeline_apply(
+            self.attack_pipeline,
+            measurements,
+            sv_states,
+            receiver_truth,
+        )
+
+    def _sync_attack_pipeline_time(self, measurements: list[Any]) -> None:
+        if self.attack_pipeline is None:
+            return
+        t_s: float | None = None
+        if measurements:
+            t_s = getattr(measurements[0], "t", None)
+        if t_s is None:
+            return
+
+        reset_fn = getattr(self.attack_pipeline, "reset", None)
+        if self._last_t_s is not None and float(t_s) < float(self._last_t_s) and callable(reset_fn):
+            reset_fn()
+
+        step_fn = getattr(self.attack_pipeline, "step", None)
+        if callable(step_fn):
+            step_fn(float(t_s))
 
     def _gate_measurements(self, measurements: list[Any]) -> list[Any]:
         if self.integrity_checker is not None and hasattr(self.integrity_checker, "gate"):
@@ -258,6 +282,32 @@ def _extract_wls_result(sol: Any) -> WlsPvtResult | None:
         return sol
     candidate = getattr(sol, "wls_result", None)
     return candidate if isinstance(candidate, WlsPvtResult) else None
+
+
+def _call_attack_pipeline_apply(
+    attack_pipeline: Any,
+    measurements: list[Any],
+    sv_states: list[Any],
+    receiver_truth: ReceiverTruth,
+) -> tuple[list[Any], Any]:
+    apply_fn = getattr(attack_pipeline, "apply")
+    try:
+        signature = inspect.signature(apply_fn)
+    except (TypeError, ValueError):
+        return apply_fn(measurements, sv_states, rx_truth=receiver_truth)
+
+    params = signature.parameters
+    if "rx_truth" in params:
+        return apply_fn(measurements, sv_states, rx_truth=receiver_truth)
+
+    positional_params = [
+        param
+        for param in params.values()
+        if param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    if len(positional_params) == 2:
+        return apply_fn(measurements, receiver_truth)
+    return apply_fn(measurements, sv_states, receiver_truth)
 
 
 def _trivial_integrity_report(
