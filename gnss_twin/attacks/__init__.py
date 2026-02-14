@@ -77,8 +77,10 @@ def create_attack(name: str, params: dict) -> AttackModel:
                 stacklevel=2,
             )
         target_sv = str(params.get("target_sv", "")).strip()
-        if not target_sv:
-            raise ValueError("spoof_pr_ramp requires target_sv to be provided")
+        auto_select_visible_sv = bool(params.get("auto_select_visible_sv", False))
+        strict_target_sv = bool(params.get("strict_target_sv", True))
+        if not target_sv and not auto_select_visible_sv:
+            raise ValueError("spoof_pr_ramp requires target_sv unless auto_select_visible_sv is true")
         if "ramp_rate_mps" in params:
             ramp_rate_mps = float(params["ramp_rate_mps"])
         elif "slope_mps" in params:
@@ -93,8 +95,8 @@ def create_attack(name: str, params: dict) -> AttackModel:
             end_t=(float(end_t) if end_t is not None else None),
             ramp_rate_mps=ramp_rate_mps,
             target_sv=target_sv,
-            auto_select_visible_sv=bool(params.get("auto_select_visible_sv", False)),
-            strict_target_sv=bool(params.get("strict_target_sv", True)),
+            auto_select_visible_sv=auto_select_visible_sv,
+            strict_target_sv=strict_target_sv,
         )
     if lowered == "jam_cn0_drop":
         unknown = set(params) - {"start_t", "cn0_drop_db", "sigma_pr_scale", "sigma_prr_scale"}
