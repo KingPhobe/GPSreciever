@@ -90,7 +90,7 @@ def test_integrity_rejects_outlier() -> None:
 
     assert measurements[target_idx].sv_id in fde_solution.fix_flags.sv_rejected
     assert fde_solution.residuals.max_m < baseline_solution.residuals.max_m
-    assert fde_solution.fix_flags.valid
+    assert not fde_solution.fix_flags.valid
     assert not baseline_solution.fix_flags.valid
 
 
@@ -266,7 +266,7 @@ def test_integrity_low_elevation_excluded_does_not_invalidate_fix() -> None:
     assert solution.fix_flags.valid
 
 
-def test_integrity_max_residual_threshold_invalidates_fix() -> None:
+def test_integrity_max_residual_threshold_exceeded_does_not_clear_safe_validity() -> None:
     rng = np.random.default_rng(21)
     constellation = SimpleGpsConstellation(SimpleGpsConfig(seed=23))
     receiver_pos = lla_to_ecef(39.0, -105.0, 30.0)
@@ -298,8 +298,7 @@ def test_integrity_max_residual_threshold_invalidates_fix() -> None:
 
     assert solution.fix_flags.raim_passed
     assert solution.residuals.max_m > config.max_residual_m
-    assert not solution.fix_flags.valid
-    assert solution.fix_flags.validity_reason == "max_residual_exceeded"
+    assert solution.fix_flags.valid
 
 
 def test_integrity_uses_precomputed_wls_when_raim_passes(monkeypatch) -> None:

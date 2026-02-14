@@ -167,7 +167,7 @@ def integrity_pvt(
         and dop.pdop <= cfg.pdop_max
         and dop.gdop <= cfg.gdop_max
     )
-    valid = mask_ok and dop_ok and chi_square_ok and residual_ok
+    valid = mask_ok and dop_ok and chi_square_ok and (len(rejected) == 0)
     validity_reason = "ok"
     if not mask_ok:
         validity_reason = "insufficient_masked_sv"
@@ -175,6 +175,8 @@ def integrity_pvt(
         validity_reason = "dop_limit"
     elif not chi_square_ok:
         validity_reason = "raim_failed"
+    elif rejected:
+        validity_reason = "sv_rejected"
     elif not residual_ok:
         validity_reason = "max_residual_exceeded"
     fix_type = _fix_type(len(used), dop, cfg)
