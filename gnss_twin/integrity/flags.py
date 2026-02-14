@@ -167,7 +167,7 @@ def integrity_pvt(
         and dop.pdop <= cfg.pdop_max
         and dop.gdop <= cfg.gdop_max
     )
-    valid = mask_ok and dop_ok and chi_square_ok and (len(rejected) == 0)
+    valid = mask_ok and dop_ok and chi_square_ok and residual_ok and (len(rejected) == 0)
     validity_reason = "ok"
     if not mask_ok:
         validity_reason = "insufficient_masked_sv"
