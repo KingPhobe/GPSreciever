@@ -64,6 +64,7 @@ class SyntheticMeasurementSource(MeasurementSource):
     attacks: list[AttackModel] = field(default_factory=list)
 
     _last_t: float | None = field(init=False, default=None)
+    _last_sv_states: list = field(init=False, default_factory=list)
     _clock_model: RandomWalkClock = field(init=False)
     _rx_lat_deg: float = field(init=False)
     _rx_lon_deg: float = field(init=False)
@@ -97,13 +98,15 @@ class SyntheticMeasurementSource(MeasurementSource):
 
     def get_measurements(self, t: float) -> list[GnssMeasurement]:
         sv_states = self.constellation.get_sv_states(t)
+        prev_t = self._last_t
+        self._last_t = float(t)
+        self._last_sv_states = list(sv_states)
         measurements: list[GnssMeasurement] = []
         attack_report = AttackReport()
-        if self._last_t is None:
+        if prev_t is None:
             dt = 0.0
         else:
-            dt = float(t - self._last_t)
-        self._last_t = float(t)
+            dt = float(t - prev_t)
         if dt > 0.0:
             self._clock_model.step(dt)
 

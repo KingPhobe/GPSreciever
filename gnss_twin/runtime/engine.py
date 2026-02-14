@@ -184,12 +184,18 @@ class SimulationEngine:
         return output
 
     def _get_sv_states(self, t_s: float) -> list[Any]:
+        t_s = float(t_s)
+        last_t = getattr(self.meas_src, "_last_t", None)
+        cached_states = getattr(self.meas_src, "_last_sv_states", None)
+        if last_t == t_s and cached_states is not None:
+            return list(cached_states)
+
         constellation = getattr(self.meas_src, "constellation", None)
         if constellation is not None and hasattr(constellation, "get_sv_states"):
-            return list(constellation.get_sv_states(float(t_s)))
+            return list(constellation.get_sv_states(t_s))
         get_states = getattr(self.meas_src, "get_sv_states", None)
         if callable(get_states):
-            return list(get_states(float(t_s)))
+            return list(get_states(t_s))
         return []
 
     def _apply_attacks(
