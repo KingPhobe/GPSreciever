@@ -43,7 +43,7 @@ from gnss_twin.sat.simple_gps import SimpleGpsConfig, SimpleGpsConstellation
 from gnss_twin.utils.angles import elev_az_from_rx_sv
 from gnss_twin.utils.wgs84 import ecef_to_lla
 from sim.run_table import add_nmea_metadata_columns
-from sim.run_static_demo import build_engine_with_truth, build_epoch_log
+from gnss_twin.runtime.factory import build_engine_with_truth, build_epoch_log
 
 
 RESID_RMS_OK_M = 10.0

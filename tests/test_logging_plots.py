@@ -8,7 +8,7 @@ import pytest
 from gnss_twin.config import SimConfig
 from gnss_twin.logger import load_epochs_npz
 from gnss_twin.plots import epochs_to_frame, plot_update
-from sim.run_static_demo import build_engine_with_truth, build_epoch_log, run_static_demo
+from gnss_twin.runtime.factory import build_engine_with_truth, build_epoch_log
 from sim.run_static_demo import run_static_demo
 
 def test_demo_outputs_and_log_reload(tmp_path: Path) -> None:
