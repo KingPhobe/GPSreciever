@@ -136,7 +136,7 @@ def build_engine_with_truth(cfg: SimConfig) -> tuple[SimulationEngine, ReceiverT
         constellation=constellation,
         receiver_truth=receiver_truth_state,
         cn0_zenith_dbhz=47.0,
-        cn0_min_dbhz=cfg.cn0_min_dbhz,
+        cn0_min_dbhz=cfg.cn0_model_min_dbhz,
         rng=rng,
     )
     attack_name = cfg.attack_name or "none"
