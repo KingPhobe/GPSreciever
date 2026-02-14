@@ -29,7 +29,12 @@ def test_nis_alarm_trips_for_spoofing(tmp_path: Path) -> None:
     epochs = _run_demo(
         tmp_path,
         attack_name="spoof_pr_ramp",
-        attack_params={"start_t": start_t, "ramp_rate_mps": 500.0, "target_sv": "G03"},
+        attack_params={
+            "start_t": start_t,
+            "ramp_rate_mps": 500.0,
+            "auto_select_visible_sv": True,
+            "strict_target_sv": False,
+        },
     )
     spoofed = [
         epoch for epoch in epochs if epoch.get("t", 0.0) >= start_t and epoch.get("nis_alarm")

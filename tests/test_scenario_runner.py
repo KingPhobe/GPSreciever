@@ -40,7 +40,12 @@ def test_scenario_runner_outputs(tmp_path: Path) -> None:
             "rng_seed": 123,
             "use_ekf": True,
             "attack_name": "spoof_pr_ramp",
-            "attack_params": {"start_t": 0.0, "ramp_rate_mps": 500.0, "target_sv": "G03"},
+            "attack_params": {
+                "start_t": 0.0,
+                "ramp_rate_mps": 500.0,
+                "auto_select_visible_sv": True,
+                "strict_target_sv": False,
+            },
         },
     )
     run_root = tmp_path / "runs"
