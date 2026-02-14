@@ -73,6 +73,12 @@ def test_save_outputs_generates_full_plot_set(tmp_path: Path, monkeypatch: pytes
         "rx_lat_deg",
         "rx_lon_deg",
         "rx_alt_m",
+        "integrity_p_value",
+        "integrity_num_sats_used",
+        "integrity_excluded_sv_ids_count",
+        "conops_reason_codes",
+        "nis",
+        "nis_alarm",
     ]:
         assert expected_column in header
 

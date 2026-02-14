@@ -83,6 +83,40 @@ def test_epochs_to_frame_includes_attack_columns(tmp_path: Path) -> None:
     assert frame["attack_active"].any()
 
 
+
+def test_epochs_to_frame_includes_integrity_columns(tmp_path: Path) -> None:
+    pytest.importorskip("pandas")
+    cfg = SimConfig(duration=1.0)
+    engine, truth = build_engine_with_truth(cfg)
+    step = engine.step(0.0)
+    epoch = build_epoch_log(
+        t_s=0.0,
+        step_out=step,
+        receiver_truth_state=truth,
+        integrity_checker=engine.integrity_checker,
+        attack_name=cfg.attack_name or "none",
+    )
+    epoch = epoch.__class__(
+        **{
+            **epoch.__dict__,
+            "nis": 1.25,
+            "nis_alarm": True,
+            "conops_reason_codes": ["excluded_svs", "nis_high"],
+            "integrity_p_value": 0.0123,
+            "integrity_num_sats_used": 5,
+            "integrity_excluded_sv_ids_count": 2,
+        }
+    )
+
+    frame = epochs_to_frame([epoch])
+
+    assert frame.loc[0, "integrity_p_value"] == pytest.approx(0.0123)
+    assert frame.loc[0, "integrity_num_sats_used"] == pytest.approx(5.0)
+    assert frame.loc[0, "integrity_excluded_sv_ids_count"] == pytest.approx(2.0)
+    assert frame.loc[0, "conops_reason_codes"] == "excluded_svs|nis_high"
+    assert frame.loc[0, "nis"] == pytest.approx(1.25)
+    assert bool(frame.loc[0, "nis_alarm"]) is True
+
 def test_plot_update_writes_pngs_to_output_dir(tmp_path: Path) -> None:
     pd = pytest.importorskip("pandas")
     frame = pd.DataFrame(
