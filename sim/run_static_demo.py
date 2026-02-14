@@ -276,7 +276,11 @@ def run_static_demo(
         sol = step.get("sol")
         if sol is not None:
             lat_deg, lon_deg, alt_m = ecef_to_lla(*sol.pos_ecef)
-            raim_valid = bool(sol.fix_flags.raim_passed)
+            raim_valid = (
+                (step.get("integrity") is not None)
+                and (not step["integrity"].is_suspect)
+                and (not step["integrity"].is_invalid)
+            )
             num_sats = int(epoch_log.sats_used or 0)
             hdop = epoch_log.hdop
             if hdop is None and epoch_log.pdop is not None:
