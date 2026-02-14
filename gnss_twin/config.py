@@ -22,6 +22,7 @@ class SimConfig:
     n_good_to_lock: int = 3
     n_bad_to_unlock: int = 2
     cn0_min_dbhz: float = 28.0
+    cn0_model_min_dbhz: float = 25.0
     sigma_pr_max_m: float = 20.0
     min_sats_for_fix: int = 4
     postfit_gate_sigma: float = 4.0

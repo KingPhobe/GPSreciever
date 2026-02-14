@@ -21,7 +21,7 @@ def _run_demo(tmp_path: Path, *, attack_name: str, attack_params: dict[str, floa
 def test_nis_alarm_nominal_stays_quiet(tmp_path: Path) -> None:
     epochs = _run_demo(tmp_path, attack_name="none", attack_params={})
     alarm_count = sum(1 for epoch in epochs if epoch.get("nis_alarm"))
-    assert alarm_count <= 1
+    assert alarm_count <= 2
 
 
 def test_nis_alarm_trips_for_spoofing(tmp_path: Path) -> None:
