@@ -29,3 +29,8 @@ include = ["gnss_twin*", "sim*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "slow: long-running integration/regression tests",
+    "gui: requires PyQt",
+    "integration: multi-module runtime tests",
+]
