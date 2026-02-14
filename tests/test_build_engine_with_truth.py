@@ -1,7 +1,7 @@
 """Smoke test for build_engine_with_truth helper used by desktop GUI."""
 
 from gnss_twin.config import SimConfig
-from sim.run_static_demo import build_engine_with_truth, build_epoch_log
+from gnss_twin.runtime.factory import build_engine_with_truth, build_epoch_log
 
 
 def test_build_engine_with_truth_smoke() -> None:

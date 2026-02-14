@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from gnss_twin.config import SimConfig
-from sim.run_static_demo import build_engine_with_truth
+from gnss_twin.runtime.factory import build_engine_with_truth
 
 
 @pytest.mark.gui
