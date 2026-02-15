@@ -101,7 +101,7 @@ class Authenticator:
         if dt_s > 0.0 and self._config.drift_rw_rms_sps_sqrt > 0.0:
             self._drift_sps += float(self._rng.normal(0.0, self._config.drift_rw_rms_sps_sqrt * np.sqrt(dt_s)))
 
-        pps_auth_edge_s = t_s + self._bias_s
+        pps_auth_edge_s = self._bias_s
         phase_err_s = None
         ref_err_s = None
         if pps_ref_edge_s is not None:
