@@ -6,6 +6,7 @@ import argparse
 import csv
 import random
 import warnings
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from gnss_twin.logger import save_epochs_csv, save_epochs_npz
 from gnss_twin.nmea.neo_m8n_output import NmeaEmit, NeoM8nNmeaOutput
 from gnss_twin.runtime.factory import build_engine_with_truth, build_epoch_log
 from gnss_twin.sat.visibility import visible_sv_states
+from gnss_twin.timing import Authenticator, AuthenticatorConfig
 from gnss_twin.utils.angles import elev_az_from_rx_sv
 from gnss_twin.utils.wgs84 import ecef_to_lla, lla_to_ecef
 from sim.run_table import write_run_table_from_epoch_logs
@@ -38,6 +40,7 @@ def run_static_demo(
     seed = int(cfg.rng_seed)
     np.random.seed(seed)
     random.seed(seed)
+    authenticator = Authenticator(replace(AuthenticatorConfig(), seed=seed))
     receiver_truth = receiver_truth_state.pos_ecef_m
     measurement_source = engine.meas_src
     integrity_checker = engine.integrity_checker
@@ -78,8 +81,42 @@ def run_static_demo(
             integrity_checker=integrity_checker,
             attack_name=attack_name,
         )
-        epochs.append(epoch_log)
+        raim_pass = bool(epoch_log.raim_pass) if epoch_log.raim_pass is not None else False
+        fix_valid = bool(epoch_log.fix_valid) if epoch_log.fix_valid is not None else False
+        gnss_valid_for_disc = raim_pass and fix_valid
         sol = step.get("sol")
+        if sol is not None:
+            clk_bias_true_s = measurement_source.receiver_clock_bias_s
+            clk_bias_est_s = sol.clk_bias_s
+            pps_platform_edge_s = authenticator._pps_builder.platform_edge(
+                t,
+                clk_bias_est_s,
+                clk_bias_true_s,
+            )
+        else:
+            pps_platform_edge_s = None
+        pps_ref_edge_s = authenticator._pps_builder.ref_edge(t)
+        auth_tel, pps_tel = authenticator.step(
+            t,
+            pps_platform_edge_s=pps_platform_edge_s if pps_platform_edge_s is not None else pps_ref_edge_s,
+            pps_ref_edge_s=pps_ref_edge_s,
+            gnss_valid=gnss_valid_for_disc,
+        )
+        epoch_log = replace(
+            epoch_log,
+            pps_ref_edge_s=pps_tel.ref_edge_s,
+            pps_platform_edge_s=pps_tel.platform_edge_s,
+            pps_auth_edge_s=pps_tel.auth_edge_s,
+            pps_platform_minus_ref_s=pps_tel.platform_minus_ref_s,
+            pps_auth_minus_ref_s=pps_tel.auth_minus_ref_s,
+            pps_platform_minus_auth_s=-pps_tel.auth_minus_platform_s,
+            auth_bit=auth_tel.auth_bit,
+            auth_locked=auth_tel.locked,
+            auth_mode="holdover" if auth_tel.holdover_active else ("locked" if auth_tel.locked else "unlocked"),
+            auth_sigma_t_s=auth_tel.rms_error_s,
+            auth_reason_codes=[auth_tel.reason_code],
+        )
+        epochs.append(epoch_log)
         if sol is not None:
             lat_deg, lon_deg, alt_m = ecef_to_lla(*sol.pos_ecef)
             raim_valid = (
