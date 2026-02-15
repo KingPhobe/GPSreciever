@@ -46,6 +46,17 @@ EPOCH_CSV_COLUMNS = [
     "integrity_residual_rms",
     "integrity_num_sats_used",
     "integrity_excluded_sv_ids_count",
+    "pps_ref_edge_s",
+    "pps_platform_edge_s",
+    "pps_auth_edge_s",
+    "pps_platform_minus_ref_s",
+    "pps_auth_minus_ref_s",
+    "pps_platform_minus_auth_s",
+    "auth_bit",
+    "auth_locked",
+    "auth_mode",
+    "auth_sigma_t_s",
+    "auth_reason_codes",
 ]
 _CSV_HEADER = ",".join(EPOCH_CSV_COLUMNS) + "\n"
 
@@ -97,6 +108,17 @@ def _epoch_to_csv_line(epoch: EpochLog) -> str:
     fix_valid = epoch.fix_valid if epoch.fix_valid is not None else (flags.valid if flags else None)
     raim_pass = epoch.raim_pass if epoch.raim_pass is not None else (flags.raim_passed if flags else None)
     fix_type = epoch.fix_type if epoch.fix_type is not None else (fix_type_from_label(flags.fix_type) if flags else None)
+    pps_ref_edge_s = getattr(epoch, "pps_ref_edge_s", None)
+    pps_platform_edge_s = getattr(epoch, "pps_platform_edge_s", None)
+    pps_auth_edge_s = getattr(epoch, "pps_auth_edge_s", None)
+    pps_platform_minus_ref_s = getattr(epoch, "pps_platform_minus_ref_s", None)
+    pps_auth_minus_ref_s = getattr(epoch, "pps_auth_minus_ref_s", None)
+    pps_platform_minus_auth_s = getattr(epoch, "pps_platform_minus_auth_s", None)
+    auth_bit = getattr(epoch, "auth_bit", None)
+    auth_locked = getattr(epoch, "auth_locked", None)
+    auth_mode = getattr(epoch, "auth_mode", None)
+    auth_sigma_t_s = getattr(epoch, "auth_sigma_t_s", None)
+    auth_reason_codes = getattr(epoch, "auth_reason_codes", None) or []
     if isinstance(fix_type, FixType):
         fix_type_value = int(fix_type)
     elif fix_type is None:
@@ -145,6 +167,17 @@ def _epoch_to_csv_line(epoch: EpochLog) -> str:
         _format_value(epoch.integrity_residual_rms),
         _format_value(epoch.integrity_num_sats_used),
         _format_value(epoch.integrity_excluded_sv_ids_count),
+        _format_value(pps_ref_edge_s),
+        _format_value(pps_platform_edge_s),
+        _format_value(pps_auth_edge_s),
+        _format_value(pps_platform_minus_ref_s),
+        _format_value(pps_auth_minus_ref_s),
+        _format_value(pps_platform_minus_auth_s),
+        _format_value(auth_bit),
+        _format_value(auth_locked),
+        auth_mode or "",
+        _format_value(auth_sigma_t_s),
+        "|".join(auth_reason_codes),
     ]
     return ",".join(str(value) for value in row) + "\n"
 
