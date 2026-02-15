@@ -46,6 +46,17 @@ EPOCH_CSV_COLUMNS = [
     "integrity_residual_rms",
     "integrity_num_sats_used",
     "integrity_excluded_sv_ids_count",
+    "pps_ref_edge_s",
+    "pps_platform_edge_s",
+    "pps_auth_edge_s",
+    "pps_platform_minus_ref_s",
+    "pps_auth_minus_ref_s",
+    "pps_platform_minus_auth_s",
+    "auth_bit",
+    "auth_locked",
+    "auth_mode",
+    "auth_sigma_t_s",
+    "auth_reason_codes",
 ]
 _CSV_HEADER = ",".join(EPOCH_CSV_COLUMNS) + "\n"
 
@@ -145,6 +156,17 @@ def _epoch_to_csv_line(epoch: EpochLog) -> str:
         _format_value(epoch.integrity_residual_rms),
         _format_value(epoch.integrity_num_sats_used),
         _format_value(epoch.integrity_excluded_sv_ids_count),
+        _format_value(epoch.pps_ref_edge_s),
+        _format_value(epoch.pps_platform_edge_s),
+        _format_value(epoch.pps_auth_edge_s),
+        _format_value(epoch.pps_platform_minus_ref_s),
+        _format_value(epoch.pps_auth_minus_ref_s),
+        _format_value(epoch.pps_platform_minus_auth_s),
+        _format_value(epoch.auth_bit),
+        _format_value(epoch.auth_locked),
+        epoch.auth_mode or "",
+        _format_value(epoch.auth_sigma_t_s),
+        "|".join(epoch.auth_reason_codes),
     ]
     return ",".join(str(value) for value in row) + "\n"
 
