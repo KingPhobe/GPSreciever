@@ -116,7 +116,7 @@ class Authenticator:
             and rms_error_s <= self._config.rms_holdover_threshold_s
         )
 
-        auth_bit = int(locked or holdover_active)
+        auth_bit = int(locked)
         if locked:
             reason_code = self.REASON_CODES["LOCKED"]
         elif holdover_active:
