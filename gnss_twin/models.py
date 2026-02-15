@@ -156,6 +156,17 @@ class EpochLog:
     integrity_residual_rms: float | None = None
     integrity_num_sats_used: int | None = None
     integrity_excluded_sv_ids_count: int | None = None
+    pps_ref_edge_s: float | None = None
+    pps_platform_edge_s: float | None = None
+    pps_auth_edge_s: float | None = None
+    pps_platform_minus_ref_s: float | None = None
+    pps_auth_minus_ref_s: float | None = None
+    pps_platform_minus_auth_s: float | None = None
+    auth_bit: int | None = None
+    auth_locked: bool | None = None
+    auth_mode: str | None = None
+    auth_sigma_t_s: float | None = None
+    auth_reason_codes: list[str] = field(default_factory=list)
     per_sv_stats: Mapping[str, Mapping[str, float]] = field(default_factory=dict)
 
 
