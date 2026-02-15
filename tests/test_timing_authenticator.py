@@ -29,7 +29,7 @@ def test_authenticator_locks_and_sets_auth_bit_under_clean_pps() -> None:
     assert telemetry[-1].auth_bit == 1
 
 
-def test_authenticator_holdover_and_unlock_after_timeout() -> None:
+def test_authenticator_holdover_auth_latched_and_timeout_without_ref() -> None:
     cfg = AuthenticatorConfig(
         seed=7,
         sigma_process_bias_s=0.0,
@@ -59,14 +59,24 @@ def test_authenticator_holdover_and_unlock_after_timeout() -> None:
     )
     assert holdover_tel.holdover_active
     assert holdover_tel.reason_code == authenticator.REASON_CODES["HOLDOVER"]
-    assert holdover_tel.auth_bit == 0
+    assert holdover_tel.auth_bit == 1
 
-    unlocked_tel = holdover_tel
-    for t_s in (6.0, 7.0, 8.0, 9.0):
+    no_ref_tel, _ = authenticator.step(
+        t_s=6.0,
+        pps_platform_edge_s=0.0,
+        pps_ref_edge_s=None,
+        gnss_valid=False,
+    )
+    assert no_ref_tel.holdover_active
+    assert no_ref_tel.reason_code == authenticator.REASON_CODES["HOLDOVER_NO_REF"]
+    assert no_ref_tel.auth_bit == 0
+
+    unlocked_tel = no_ref_tel
+    for t_s in (7.0, 8.0, 9.0):
         unlocked_tel, _ = authenticator.step(
             t_s=t_s,
             pps_platform_edge_s=0.0,
-            pps_ref_edge_s=0.0,
+            pps_ref_edge_s=None,
             gnss_valid=False,
         )
 
