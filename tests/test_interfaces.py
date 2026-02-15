@@ -85,6 +85,17 @@ def test_dataclass_fields() -> None:
         "integrity_residual_rms",
         "integrity_num_sats_used",
         "integrity_excluded_sv_ids_count",
+        "pps_ref_edge_s",
+        "pps_platform_edge_s",
+        "pps_auth_edge_s",
+        "pps_platform_minus_ref_s",
+        "pps_auth_minus_ref_s",
+        "pps_platform_minus_auth_s",
+        "auth_bit",
+        "auth_locked",
+        "auth_mode",
+        "auth_sigma_t_s",
+        "auth_reason_codes",
         "per_sv_stats",
     ]
     assert [field.name for field in fields(FixFlags)] == [
