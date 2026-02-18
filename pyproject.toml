@@ -34,4 +34,5 @@ markers = [
     "gui: requires PyQt",
     "integration: multi-module runtime tests",
     "regression: regression coverage tests",
+    "legacy: old orbit/meas.models/receiver.solver stack",
 ]

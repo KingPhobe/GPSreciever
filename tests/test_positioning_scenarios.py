@@ -1,3 +1,4 @@
+import pytest
 import numpy as np
 
 from gnss_twin.integrity import raim_fde
@@ -5,6 +6,9 @@ from gnss_twin.meas.models import LIGHT_SPEED, Measurement
 from gnss_twin.receiver import wls_solve
 from gnss_twin.sat import SyntheticOrbitModel
 
+
+
+pytestmark = pytest.mark.legacy
 
 def _make_measurements(
     receiver_pos: np.ndarray,

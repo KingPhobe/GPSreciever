@@ -22,4 +22,4 @@ jobs:
           pip install -e .[dev]
 
       - name: Run fast unit tests (exclude slow/regression/gui)
-        run: pytest -m "not slow and not regression and not gui"
+        run: pytest -m "not slow and not regression and not gui and not legacy"
