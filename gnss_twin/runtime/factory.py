@@ -6,7 +6,7 @@ import random
 from typing import Any
 
 import numpy as np
-
+from scipy.stats import chi2
 from gnss_twin.attacks import AttackPipeline, create_attack
 from gnss_twin.config import SimConfig
 from gnss_twin.models import EpochLog, ReceiverTruth, fix_type_from_label
@@ -98,13 +98,19 @@ def build_epoch_log(
         vel_ecef=sol.vel_ecef.copy() if sol is not None and sol.vel_ecef is not None else None,
         clk_bias_s=sol.clk_bias_s if sol is not None else None,
         clk_drift_sps=sol.clk_drift_sps if sol is not None else None,
-        nis=None,
-        nis_alarm=(integrity.is_suspect or integrity.is_invalid or (applied_count > 0)),
+        nis=_extract_float(step_out.get("nis")),
+        innov_dim=_extract_int(step_out.get("innov_dim")),
+        nis_alarm=_compute_nis_alarm(
+                nis=_extract_float(step_out.get("nis")),
+                innov_dim=_extract_int(step_out.get("innov_dim")),
+                alpha=float(getattr(integrity_checker.integrity_cfg, "chi_square_alpha", 0.01)),
+                integrity_alarm=bool(integrity.is_suspect or integrity.is_invalid),
+                attack_active=bool(applied_count > 0),
+        ),
         attack_name=attack_name,
         attack_active=applied_count > 0,
         attack_pr_bias_mean_m=attack_pr_bias_mean_m,
         attack_prr_bias_mean_mps=attack_prr_bias_mean_mps,
-        innov_dim=None,
         conops_status=conops.status.value if conops is not None else None,
         conops_mode5=conops.mode5.value if conops is not None else None,
         conops_reason_codes=list(conops.reason_codes) if conops is not None else [],
@@ -114,3 +120,43 @@ def build_epoch_log(
         integrity_excluded_sv_ids_count=len(integrity.excluded_sv_ids),
         per_sv_stats=per_sv_stats,
     )
+def _extract_float(value: Any | None) -> float | None:
+    if value is None:
+        return None
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(out):
+        return None
+    return out
+
+
+def _extract_int(value: Any | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        out = int(value)
+    except (TypeError, ValueError):
+        return None
+    return out if out > 0 else None
+
+def _compute_nis_alarm(
+    *,
+    nis: float | None,
+    innov_dim: int | None,
+    alpha: float,
+    integrity_alarm: bool,
+    attack_active: bool,
+) -> bool:
+    """True if NIS exceeds chi-square threshold (with safety ORs for legacy behavior)."""
+    nis_trigger = False
+    if nis is not None and innov_dim is not None and innov_dim > 0:
+        try:
+            threshold = float(chi2.ppf(1.0 - alpha, innov_dim))
+        except Exception:
+            threshold = float("inf")
+        nis_trigger = bool(np.isfinite(threshold) and nis > threshold)
+
+    # Preserve legacy semantics: integrity failures and active attacks also count as alarms.
+    return bool(nis_trigger or integrity_alarm or attack_active)
