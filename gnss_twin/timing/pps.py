@@ -3,8 +3,31 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 
 import numpy as np
+
+
+class PpsSource(Enum):
+    """PPS pulse source classification."""
+
+    GROUND = "ground"
+    RECEIVER = "receiver"
+
+
+@dataclass(frozen=True)
+class PpsPulse:
+    """Single PPS pulse stamped in true and local clock domains."""
+
+    t_true_s: float
+    t_local_s: float
+    source: PpsSource
+
+
+def pps_error_s(rx_pulse: PpsPulse, ground_pulse: PpsPulse) -> float:
+    """Return PPS error in seconds using local-clock timestamps."""
+
+    return float(rx_pulse.t_local_s) - float(ground_pulse.t_local_s)
 
 
 @dataclass(frozen=True)
