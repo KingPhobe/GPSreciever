@@ -377,7 +377,6 @@ class Engine:
         epoch_log = build_epoch_log(
             t_s=float(t),
             step_out=step_out,
-            receiver_truth_state=self.receiver_truth,
             integrity_checker=self.integrity_checker,
             attack_name=self.cfg.attack_name or "none",
         )

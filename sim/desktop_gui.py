@@ -580,7 +580,6 @@ class MainWindow(QMainWindow):
         epoch = build_epoch_log(
             t_s=float(self.t_s_current),
             step_out=step_out,
-            receiver_truth_state=self.receiver_truth_state,
             integrity_checker=self.engine.integrity_checker,
             attack_name=self.cfg.attack_name or "none",
         )
