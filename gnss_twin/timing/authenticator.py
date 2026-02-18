@@ -221,3 +221,24 @@ class Authenticator:
             return float("inf")
         values = np.asarray(self._residual_window, dtype=float)
         return float(np.sqrt(np.mean(values * values)))
+
+
+@dataclass
+class Mode5Authenticator:
+    """Mode-5 authenticator latch driven by ConOps gate output."""
+
+    auth_bit: bool = False
+
+    def step(self, mode5_gate: str, gnss_valid: bool, holdover_ok: bool) -> bool:
+        """Advance authenticator latch state for a single epoch."""
+
+        if mode5_gate == "deny":
+            self.auth_bit = False
+        elif mode5_gate == "allow":
+            self.auth_bit = True
+        elif mode5_gate == "hold_last":
+            if gnss_valid:
+                return self.auth_bit
+            self.auth_bit = bool(self.auth_bit and holdover_ok)
+
+        return self.auth_bit
