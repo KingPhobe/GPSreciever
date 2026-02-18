@@ -18,6 +18,8 @@ from gnss_twin.nmea.neo_m8n_output import NmeaEmit, NeoM8nNmeaOutput
 from gnss_twin.runtime.factory import build_engine_with_truth, build_epoch_log
 from gnss_twin.sat.visibility import visible_sv_states
 from gnss_twin.timing import Authenticator, AuthenticatorConfig
+from gnss_twin.timing.authenticator import Mode5Authenticator
+from gnss_twin.timing.holdover import HoldoverConfig, HoldoverMonitor
 from gnss_twin.utils.angles import elev_az_from_rx_sv
 from gnss_twin.utils.wgs84 import ecef_to_lla, lla_to_ecef
 from sim.run_table import write_run_table_from_epoch_logs
@@ -41,6 +43,13 @@ def run_static_demo(
     np.random.seed(seed)
     random.seed(seed)
     authenticator = Authenticator(replace(AuthenticatorConfig(), seed=seed))
+    holdover = HoldoverMonitor(
+        HoldoverConfig(
+            max_abs_pps_err_s=2e-6,
+            max_time_since_ground_pps_s=2.0,
+        )
+    )
+    mode5_auth = Mode5Authenticator()
     receiver_truth = receiver_truth_state.pos_ecef_m
     measurement_source = engine.meas_src
     integrity_checker = engine.integrity_checker
@@ -115,6 +124,30 @@ def run_static_demo(
             auth_sigma_t_s=auth_tel.rms_error_s,
             auth_reason_codes=[auth_tel.reason_code],
         )
+        pps_err_s = pps_tel.auth_minus_ref_s if pps_ref_edge_s is not None else None
+        hold_info = holdover.update(
+            t_true_s=float(t),
+            pps_err_s=pps_err_s,
+            saw_ground_pps=(pps_ref_edge_s is not None),
+        )
+        holdover_ok = bool(hold_info["holdover_ok"])
+        time_since_ground_pps_s = float(hold_info["time_since_ground_pps_s"])
+        mode5_gate = epoch_log.conops_mode5 or "deny"
+        gnss_valid = bool(gnss_valid_for_disc)
+        mode5_auth_bit = bool(
+            mode5_auth.step(
+                mode5_gate=mode5_gate,
+                gnss_valid=gnss_valid,
+                holdover_ok=holdover_ok,
+            )
+        )
+        epoch_log = replace(
+            epoch_log,
+            pps_err_s=pps_err_s,
+            holdover_ok=holdover_ok,
+            time_since_ground_pps_s=time_since_ground_pps_s,
+            mode5_auth_bit=mode5_auth_bit,
+        )
         epochs.append(epoch_log)
         if sol is not None:
             lat_deg, lon_deg, alt_m = ecef_to_lla(*sol.pos_ecef)
@@ -154,6 +187,38 @@ def run_static_demo(
     save_epochs_npz(output_dir / "epoch_logs.npz", epochs)
     save_epochs_csv(output_dir / "epoch_logs.csv", epochs)
     write_run_table_from_epoch_logs(output_dir / "epoch_logs.csv", output_dir / "run_table.csv", cfg)
+    with (output_dir / "mode5_auth.csv").open("w", encoding="utf-8", newline="") as mode5_csv:
+        writer = csv.DictWriter(
+            mode5_csv,
+            fieldnames=[
+                "t_s",
+                "conops_mode5",
+                "mode5_auth_bit",
+                "auth_bit",
+                "auth_mode",
+                "auth_sigma_t_s",
+                "pps_auth_minus_ref_s",
+                "pps_err_s",
+                "holdover_ok",
+                "time_since_ground_pps_s",
+            ],
+        )
+        writer.writeheader()
+        for epoch in epochs:
+            writer.writerow(
+                {
+                    "t_s": epoch.t_s,
+                    "conops_mode5": epoch.conops_mode5,
+                    "mode5_auth_bit": int(bool(epoch.mode5_auth_bit)),
+                    "auth_bit": int(bool(epoch.auth_bit)),
+                    "auth_mode": epoch.auth_mode,
+                    "auth_sigma_t_s": epoch.auth_sigma_t_s,
+                    "pps_auth_minus_ref_s": epoch.pps_auth_minus_ref_s,
+                    "pps_err_s": epoch.pps_err_s,
+                    "holdover_ok": int(bool(epoch.holdover_ok)),
+                    "time_since_ground_pps_s": epoch.time_since_ground_pps_s,
+                }
+            )
     (output_dir / "nmea_output.nmea").write_text(
         "".join(f"{emit.nmea_sentence}\r\n" for emit in nmea_emits),
         encoding="utf-8",
