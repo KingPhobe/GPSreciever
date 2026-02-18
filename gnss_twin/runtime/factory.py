@@ -63,12 +63,12 @@ def build_epoch_log(
     *,
     t_s: float,
     step_out: dict[str, Any],
-    receiver_truth_state: ReceiverTruth,
     integrity_checker: RaimIntegrityChecker,
     attack_name: str,
 ) -> EpochLog:
     """Build an EpochLog entry from a SimulationEngine step output."""
     sol = step_out["sol"]
+    truth = step_out.get("rx_truth")
     integrity = step_out["integrity"]
     conops = step_out.get("conops")
     attack_report = step_out.get("attack_report")
@@ -84,7 +84,7 @@ def build_epoch_log(
         t=float(t_s),
         meas=step_out["meas_attacked"],
         solution=sol,
-        truth=receiver_truth_state,
+        truth=truth,
         t_s=float(t_s),
         fix_valid=sol.fix_flags.valid if sol is not None else None,
         raim_pass=sol.fix_flags.raim_passed if sol is not None else None,

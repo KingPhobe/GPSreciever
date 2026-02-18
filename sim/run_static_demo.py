@@ -77,7 +77,6 @@ def run_static_demo(
         epoch_log = build_epoch_log(
             t_s=float(t),
             step_out=step,
-            receiver_truth_state=receiver_truth_state,
             integrity_checker=integrity_checker,
             attack_name=attack_name,
         )

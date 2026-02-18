@@ -34,7 +34,6 @@ def test_save_outputs_generates_full_plot_set(tmp_path: Path, monkeypatch: pytes
         epoch = build_epoch_log(
             t_s=t_s,
             step_out=step,
-            receiver_truth_state=truth,
             integrity_checker=engine.integrity_checker,
             attack_name=cfg.attack_name or "none",
         )
@@ -103,7 +102,6 @@ def test_save_outputs_uses_unique_directory_on_collision(
         epoch = build_epoch_log(
             t_s=t_s,
             step_out=step,
-            receiver_truth_state=truth,
             integrity_checker=engine.integrity_checker,
             attack_name=cfg.attack_name or "none",
         )

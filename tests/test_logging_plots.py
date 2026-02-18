@@ -68,7 +68,6 @@ def test_epochs_to_frame_includes_attack_columns(tmp_path: Path) -> None:
         epoch = build_epoch_log(
             t_s=t_s,
             step_out=step,
-            receiver_truth_state=truth,
             integrity_checker=engine.integrity_checker,
             attack_name=cfg.attack_name or "none",
         )
@@ -96,7 +95,6 @@ def test_epochs_to_frame_includes_integrity_columns(tmp_path: Path) -> None:
     epoch = build_epoch_log(
         t_s=0.0,
         step_out=step,
-        receiver_truth_state=truth,
         integrity_checker=engine.integrity_checker,
         attack_name=cfg.attack_name or "none",
     )
