@@ -8,7 +8,13 @@ import numpy as np
 
 from gnss_twin.attacks import AttackModel
 from gnss_twin.attacks.base import AttackReport
-from gnss_twin.models import Constellation, GnssMeasurement, MeasurementSource, ReceiverTruth
+from gnss_twin.models import (
+    Constellation,
+    GnssMeasurement,
+    MeasurementSource,
+    ReceiverTruth,
+    SvState,
+)
 from gnss_twin.meas.clock_models import RandomWalkClock
 from gnss_twin.meas.iono_klobuchar import klobuchar_delay_m
 from gnss_twin.meas.multipath import multipath_bias_m
@@ -96,7 +102,7 @@ class SyntheticMeasurementSource(MeasurementSource):
     def receiver_clock_drift_sps(self) -> float:
         return self._clock_model.state.drift_sps
 
-    def get_measurements(self, t: float) -> list[GnssMeasurement]:
+    def get_batch(self, t: float) -> tuple[list[GnssMeasurement], list[SvState], ReceiverTruth]:
         sv_states = self.constellation.get_sv_states(t)
         prev_t = self._last_t
         self._last_t = float(t)
@@ -109,6 +115,8 @@ class SyntheticMeasurementSource(MeasurementSource):
             dt = float(t - prev_t)
         if dt > 0.0:
             self._clock_model.step(dt)
+        current_clock_bias_s = self.receiver_clock_bias_s
+        current_clock_drift_sps = self.receiver_clock_drift_sps
 
         for state in sv_states:
             elev_deg, az_deg = elev_az_from_rx_sv(self.receiver_truth.pos_ecef_m, state.pos_ecef_m)
@@ -155,7 +163,7 @@ class SyntheticMeasurementSource(MeasurementSource):
             noise_m = float(self.rng.normal(0.0, sigma_pr_m))
             pr_m = pseudorange_m(
                 self.receiver_truth.pos_ecef_m,
-                self.receiver_clock_bias_s,
+                current_clock_bias_s,
                 state.pos_ecef_m,
                 state.clk_bias_s,
             ) + model_corr_m + multipath_m + noise_m
@@ -168,7 +176,7 @@ class SyntheticMeasurementSource(MeasurementSource):
             prr_noise_mps = float(self.rng.normal(0.0, self.prr_sigma_mps))
             prr_mps = (
                 range_rate_mps
-                + LIGHT_SPEED_MPS * (self.receiver_clock_drift_sps - state.clk_drift_sps)
+                + LIGHT_SPEED_MPS * (current_clock_drift_sps - state.clk_drift_sps)
                 + prr_noise_mps
             )
             meas = GnssMeasurement(
@@ -191,4 +199,14 @@ class SyntheticMeasurementSource(MeasurementSource):
                     attack_report.prr_bias_sum_mps += delta.prr_bias_mps
             measurements.append(meas)
         self.last_attack_report = attack_report
+        rx_truth_snapshot = ReceiverTruth(
+            pos_ecef_m=self.receiver_truth.pos_ecef_m,
+            vel_ecef_mps=self.receiver_truth.vel_ecef_mps,
+            clk_bias_s=current_clock_bias_s,
+            clk_drift_sps=current_clock_drift_sps,
+        )
+        return measurements, list(sv_states), rx_truth_snapshot
+
+    def get_measurements(self, t: float) -> list[GnssMeasurement]:
+        measurements, _, _ = self.get_batch(t)
         return measurements
