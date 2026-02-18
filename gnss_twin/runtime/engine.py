@@ -13,7 +13,6 @@ from gnss_twin.attacks import AttackPipeline
 from gnss_twin.config import SimConfig
 from gnss_twin.integrity.flags import IntegrityConfig, SvTracker, integrity_pvt
 from gnss_twin.integrity.report import IntegrityReport
-from gnss_twin.integrity.raim import compute_raim
 from gnss_twin.models import EpochLog, PvtSolution, ReceiverTruth
 from gnss_twin.receiver.gating import prefit_filter
 from gnss_twin.receiver.wls_pvt import WlsPvtResult
@@ -97,19 +96,12 @@ class RaimIntegrityChecker:
             for sv_id, stats in per_sv_stats.items()
             if np.isfinite(stats.get("residual_m", float("nan")))
         }
-        sigmas_by_sv = {
-            meas.sv_id: float(meas.sigma_pr_m)
-            for meas in measurements
-            if hasattr(meas, "sv_id")
-        }
-        t_stat, dof, threshold, passed = compute_raim(
-            residuals_by_sv,
-            sigmas_by_sv,
-            num_states=4,
-            alpha=self.integrity_cfg.chi_square_alpha,
-        )
+        t_stat = float(integrity_solution.fix_flags.chi_square)
+        threshold = float(integrity_solution.fix_flags.chi_square_threshold)
+        passed = bool(integrity_solution.fix_flags.raim_passed)
+        dof = max(0, len(residuals_by_sv) - 4)
         p_value = None
-        if dof > 0 and np.isfinite(t_stat):
+        if dof > 0 and np.isfinite(t_stat) and np.isfinite(threshold):
             p_value = float(1.0 - chi2.cdf(t_stat, dof))
         excluded_sv_ids = [_parse_sv_id(sv_id) for sv_id in integrity_solution.fix_flags.sv_rejected]
         excluded_sv_ids = [sv_id for sv_id in excluded_sv_ids if sv_id is not None]
