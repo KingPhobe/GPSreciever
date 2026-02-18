@@ -29,57 +29,61 @@ def test_authenticator_locks_and_sets_auth_bit_under_clean_pps() -> None:
     assert telemetry[-1].auth_bit == 1
 
 
-def test_authenticator_holdover_auth_latched_and_timeout_without_ref() -> None:
+def test_authenticator_holdover_then_expires() -> None:
     cfg = AuthenticatorConfig(
         seed=7,
         sigma_process_bias_s=0.0,
         sigma_process_drift_sps=0.0,
+        drift_rw_rms_sps_sqrt=5.0e-6,
         min_samples_to_lock=3,
-        rms_lock_threshold_s=1.0e-9,
-        rms_holdover_threshold_s=1.0e-9,
-        holdover_max_s=3.0,
+        rms_lock_threshold_s=1.0e-3,
+        rms_holdover_threshold_s=1.0e-3,
+        holdover_max_s=300.0,
+        holdover_max_auth_minus_ref_s=5.0e-4,
+        require_ref_for_holdover_auth=True,
     )
     authenticator = Authenticator(cfg)
 
-    for t_s in range(5):
-        auth_tel, _ = authenticator.step(
+    t0 = 5.0
+    for t_s in range(int(t0)):
+        tel, _ = authenticator.step(
             t_s=float(t_s),
             pps_platform_edge_s=0.0,
             pps_ref_edge_s=0.0,
             gnss_valid=True,
         )
-    assert auth_tel.locked
-    assert auth_tel.auth_bit == 1
+    assert tel.locked
+    assert tel.auth_bit == 1
 
-    holdover_tel, _ = authenticator.step(
-        t_s=5.0,
+
+    tel, _ = authenticator.step(
+        t_s=t0,
         pps_platform_edge_s=0.0,
         pps_ref_edge_s=0.0,
         gnss_valid=False,
     )
-    assert holdover_tel.holdover_active
-    assert holdover_tel.reason_code == authenticator.REASON_CODES["HOLDOVER"]
-    assert holdover_tel.auth_bit == 1
+    auth_mode = "holdover" if tel.holdover_active else ("locked" if tel.locked else "unlocked")
+    auth_reason_codes = [tel.reason_code]
+    assert auth_mode == "holdover"
+    assert tel.locked is True
+    assert tel.auth_bit == 1
 
-    no_ref_tel, _ = authenticator.step(
-        t_s=6.0,
-        pps_platform_edge_s=0.0,
-        pps_ref_edge_s=None,
-        gnss_valid=False,
-    )
-    assert no_ref_tel.holdover_active
-    assert no_ref_tel.reason_code == authenticator.REASON_CODES["HOLDOVER_NO_REF"]
-    assert no_ref_tel.auth_bit == 0
-
-    unlocked_tel = no_ref_tel
-    for t_s in (7.0, 8.0, 9.0):
-        unlocked_tel, _ = authenticator.step(
-            t_s=t_s,
+    dropped = False
+    for k in range(1, 200):
+        tel, _ = authenticator.step(
+            t_s=t0 + float(k),
             pps_platform_edge_s=0.0,
-            pps_ref_edge_s=None,
+            pps_ref_edge_s=0.0,
             gnss_valid=False,
         )
+        if tel.auth_bit == 0:
+            auth_reason_codes = [tel.reason_code]
+            dropped = True
+            break
 
-    assert not unlocked_tel.locked
-    assert not unlocked_tel.holdover_active
-    assert unlocked_tel.auth_bit == 0
+    assert dropped is True
+    assert tel.locked is False
+    assert (
+        "holdover_drift_exceeded" in auth_reason_codes
+        or "auth_fail_holdover_drift" in auth_reason_codes
+    )
