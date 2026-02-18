@@ -97,6 +97,10 @@ def test_dataclass_fields() -> None:
         "auth_sigma_t_s",
         "auth_reason_codes",
         "per_sv_stats",
+        "pps_err_s",
+        "holdover_ok",
+        "time_since_ground_pps_s",
+        "mode5_auth_bit",
     ]
     assert [field.name for field in fields(FixFlags)] == [
         "fix_type",

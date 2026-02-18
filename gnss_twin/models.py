@@ -168,6 +168,10 @@ class EpochLog:
     auth_sigma_t_s: float | None = None
     auth_reason_codes: list[str] = field(default_factory=list)
     per_sv_stats: Mapping[str, Mapping[str, float]] = field(default_factory=dict)
+    pps_err_s: float | None = None
+    holdover_ok: bool | None = None
+    time_since_ground_pps_s: float | None = None
+    mode5_auth_bit: bool | None = None
 
 
 class MeasurementSource(ABC):

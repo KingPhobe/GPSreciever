@@ -57,6 +57,10 @@ EPOCH_CSV_COLUMNS = [
     "auth_mode",
     "auth_sigma_t_s",
     "auth_reason_codes",
+    "pps_err_s",
+    "holdover_ok",
+    "time_since_ground_pps_s",
+    "mode5_auth_bit",
 ]
 _CSV_HEADER = ",".join(EPOCH_CSV_COLUMNS) + "\n"
 
@@ -119,6 +123,10 @@ def _epoch_to_csv_line(epoch: EpochLog) -> str:
     auth_mode = getattr(epoch, "auth_mode", None)
     auth_sigma_t_s = getattr(epoch, "auth_sigma_t_s", None)
     auth_reason_codes = getattr(epoch, "auth_reason_codes", None) or []
+    pps_err_s = getattr(epoch, "pps_err_s", None)
+    holdover_ok = getattr(epoch, "holdover_ok", None)
+    time_since_ground_pps_s = getattr(epoch, "time_since_ground_pps_s", None)
+    mode5_auth_bit = getattr(epoch, "mode5_auth_bit", None)
     if isinstance(fix_type, FixType):
         fix_type_value = int(fix_type)
     elif fix_type is None:
@@ -178,6 +186,10 @@ def _epoch_to_csv_line(epoch: EpochLog) -> str:
         auth_mode or "",
         _format_value(auth_sigma_t_s),
         "|".join(auth_reason_codes),
+        _format_value(pps_err_s),
+        _format_value(holdover_ok),
+        _format_value(time_since_ground_pps_s),
+        _format_value(mode5_auth_bit),
     ]
     return ",".join(str(value) for value in row) + "\n"
 

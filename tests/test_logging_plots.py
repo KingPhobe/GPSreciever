@@ -48,6 +48,10 @@ def test_demo_outputs_and_log_reload(tmp_path: Path) -> None:
     assert "integrity_residual_rms" in columns
     assert "integrity_num_sats_used" in columns
     assert "integrity_excluded_sv_ids_count" in columns
+    assert "pps_err_s" in columns
+    assert "holdover_ok" in columns
+    assert "time_since_ground_pps_s" in columns
+    assert "mode5_auth_bit" in columns
 
 
 def test_epochs_to_frame_includes_attack_columns(tmp_path: Path) -> None:
