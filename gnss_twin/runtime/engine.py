@@ -157,13 +157,21 @@ class SimulationEngine:
         self._last_t_s: float | None = None
 
     def step(self, t_s: float) -> dict[str, Any]:
-        meas_raw = list(self.meas_src.get_measurements(float(t_s)))
-        sv_states = self._get_sv_states(float(t_s))
+        t_s = float(t_s)
+        get_batch = getattr(self.meas_src, "get_batch", None)
+        if callable(get_batch):
+            meas_raw, sv_states, rx_truth = get_batch(t_s)
+            meas_raw = list(meas_raw)
+            sv_states = list(sv_states)
+        else:
+            meas_raw = list(self.meas_src.get_measurements(t_s))
+            sv_states = self._get_sv_states(t_s)
+            rx_truth = getattr(self.meas_src, "receiver_truth", None)
         meas_attacked, attack_report = self._apply_attacks(meas_raw, sv_states)
         gated_meas = self._gate_measurements(meas_attacked)
-        sol = self._solve(gated_meas, sv_states, t_s=float(t_s))
+        sol = self._solve(gated_meas, sv_states, t_s=t_s)
         integrity = self._check_integrity(gated_meas, sv_states, sol)
-        conops = self.conops_sm.step(float(t_s), integrity, sol, None) if self.conops_sm else None
+        conops = self.conops_sm.step(t_s, integrity, sol, None) if self.conops_sm else None
         output = {
             "meas_raw": meas_raw,
             "meas_attacked": meas_attacked,
@@ -171,19 +179,15 @@ class SimulationEngine:
             "sol": sol,
             "conops": conops,
             "attack_report": attack_report,
+            "rx_truth": rx_truth,
         }
         if self.logger is not None:
             self.logger(output)
-        self._update_last_state(sol, float(t_s))
+        self._update_last_state(sol, t_s)
         return output
 
     def _get_sv_states(self, t_s: float) -> list[Any]:
         t_s = float(t_s)
-        last_t = getattr(self.meas_src, "_last_t", None)
-        cached_states = getattr(self.meas_src, "_last_sv_states", None)
-        if last_t == t_s and cached_states is not None:
-            return list(cached_states)
-
         constellation = getattr(self.meas_src, "constellation", None)
         if constellation is not None and hasattr(constellation, "get_sv_states"):
             return list(constellation.get_sv_states(t_s))
