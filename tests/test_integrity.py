@@ -1,3 +1,4 @@
+import pytest
 from dataclasses import replace
 
 import numpy as np
@@ -6,6 +7,9 @@ from gnss_twin.integrity import raim_fde
 from gnss_twin.meas import NoiseModel, compute_measurements
 from gnss_twin.sat import SyntheticOrbitModel
 
+
+
+pytestmark = pytest.mark.legacy
 
 def test_raim_fde_flags_fault() -> None:
     rng = np.random.default_rng(2)

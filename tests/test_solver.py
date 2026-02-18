@@ -1,8 +1,12 @@
+import pytest
 import numpy as np
 
 from gnss_twin.meas import NoiseModel, compute_measurements
 from gnss_twin.receiver import wls_solve
 from gnss_twin.sat import SyntheticOrbitModel
+
+
+pytestmark = pytest.mark.legacy
 
 
 def test_wls_solver_converges() -> None:
