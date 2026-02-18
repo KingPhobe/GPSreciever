@@ -360,3 +360,55 @@ def test_integrity_uses_precomputed_wls_when_raim_passes(monkeypatch) -> None:
 
     assert reused_solution.fix_flags.raim_passed
     assert reused_calls == 0
+
+
+def test_raim_integrity_checker_does_not_call_compute_raim(monkeypatch) -> None:
+    from gnss_twin.models import DopMetrics, FixFlags, PvtSolution, ResidualStats
+    import gnss_twin.runtime.engine as engine_module
+
+    checker = engine_module.RaimIntegrityChecker()
+
+    solution = PvtSolution(
+        pos_ecef=np.zeros(3),
+        vel_ecef=None,
+        clk_bias_s=0.0,
+        clk_drift_sps=0.0,
+        dop=DopMetrics(gdop=1.0, pdop=1.0, hdop=1.0, vdop=1.0),
+        residuals=ResidualStats(rms_m=1.0, mean_m=0.0, max_m=1.5, chi_square=2.5),
+        fix_flags=FixFlags(
+            fix_type="3D",
+            valid=True,
+            sv_used=["G01", "G02", "G03", "G04", "G05"],
+            sv_rejected=[],
+            sv_count=5,
+            sv_in_view=5,
+            mask_ok=True,
+            pdop=1.0,
+            gdop=1.0,
+            chi_square=2.5,
+            chi_square_threshold=9.49,
+            raim_passed=True,
+            validity_reason="ok",
+        ),
+    )
+
+    def fake_integrity_pvt(*args, **kwargs):
+        return solution, {
+            "G01": {"residual_m": 0.1},
+            "G02": {"residual_m": 0.2},
+            "G03": {"residual_m": 0.3},
+            "G04": {"residual_m": 0.4},
+            "G05": {"residual_m": 0.5},
+        }
+
+    def explode_compute_raim(*args, **kwargs):
+        raise AssertionError("compute_raim should not be called by RaimIntegrityChecker.check")
+
+    monkeypatch.setattr(engine_module, "integrity_pvt", fake_integrity_pvt)
+    monkeypatch.setattr(engine_module, "compute_raim", explode_compute_raim, raising=False)
+
+    report = checker.check(measurements=[], sv_states=[], sol=None)
+
+    assert report.chi2 == solution.fix_flags.chi_square
+    assert report.is_suspect is False
+    assert report.reason_codes == ["integrity_ok"]
