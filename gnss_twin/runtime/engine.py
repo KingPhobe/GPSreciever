@@ -173,6 +173,10 @@ class SimulationEngine:
             "attack_report": attack_report,
             "rx_truth": rx_truth,
         }
+         # Expose solver diagnostics (optional) for logging/metrics.
+         output["nis"] = getattr(self.solver, "last_nis", None)
+         output["innov_dim"] = getattr(self.solver, "last_innov_dim", None)
+
         if self.logger is not None:
             self.logger(output)
         self._update_last_state(sol, t_s)
@@ -257,6 +261,11 @@ class SimulationEngine:
             return _trivial_integrity_report(measurements, sol)
         checker = self.integrity_checker
         precomputed_wls = _extract_wls_result(sol)
+        if precomputed_wls is None:
+             candidate = getattr(self.solver, "last_wls", None)
+             if isinstance(candidate, WlsPvtResult):
+                 precomputed_wls = candidate
+
         if hasattr(checker, "check"):
             try:
                 return checker.check(
