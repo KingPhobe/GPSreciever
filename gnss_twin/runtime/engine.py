@@ -173,9 +173,9 @@ class SimulationEngine:
             "attack_report": attack_report,
             "rx_truth": rx_truth,
         }
-         # Expose solver diagnostics (optional) for logging/metrics.
-         output["nis"] = getattr(self.solver, "last_nis", None)
-         output["innov_dim"] = getattr(self.solver, "last_innov_dim", None)
+        # Expose solver diagnostics (optional) for logging/metrics.
+        output["nis"] = getattr(self.solver, "last_nis", None)
+        output["innov_dim"] = getattr(self.solver, "last_innov_dim", None)
 
         if self.logger is not None:
             self.logger(output)
@@ -262,9 +262,9 @@ class SimulationEngine:
         checker = self.integrity_checker
         precomputed_wls = _extract_wls_result(sol)
         if precomputed_wls is None:
-             candidate = getattr(self.solver, "last_wls", None)
-             if isinstance(candidate, WlsPvtResult):
-                 precomputed_wls = candidate
+            candidate = getattr(self.solver, "last_wls", None)
+            if isinstance(candidate, WlsPvtResult):
+                precomputed_wls = candidate
 
         if hasattr(checker, "check"):
             try:
@@ -356,45 +356,58 @@ def _parse_sv_id(sv_id: str) -> int | None:
 
 
 class Engine:
-    """Compatibility wrapper that delegates execution to ``SimulationEngine``."""
+    """Backwards-compatible runtime wrapper around :class:`SimulationEngine`.
 
-    def __init__(self, cfg: SimConfig) -> None:
-        self.cfg = cfg
-        self.reset()
+    The project historically exposed an `Engine` with a small API used by tests and simple scripts.
+    We keep it as a thin wrapper to avoid duplicating logic across GUI/scenario runners.
+    """
+
+    def __init__(self, cfg: SimConfig | None = None) -> None:
+        self.cfg = cfg or SimConfig()
+        self.sim_engine: SimulationEngine | None = None
+        self.receiver_truth_state: ReceiverTruth | None = None
+        self.attack_name = self.cfg.attack_name or "none"
 
     def reset(self) -> None:
         from gnss_twin.runtime.factory import build_engine_with_truth
 
-        self._engine, self.receiver_truth = build_engine_with_truth(self.cfg)
-        self.integrity_checker = self._engine.integrity_checker
-        self.measurement_source = self._engine.meas_src
-        self.constellation = getattr(self.measurement_source, "constellation", None)
+        self.sim_engine, self.receiver_truth_state = build_engine_with_truth(self.cfg)
+        self.attack_name = self.cfg.attack_name or "none"
 
-    def step(self, t: float) -> tuple[PvtSolution | None, dict[str, Any]]:
+    def step(self, t_s: float) -> tuple[PvtSolution, dict[str, Any]]:
+        if self.sim_engine is None:
+            self.reset()
+        assert self.sim_engine is not None
+
+        step_out = self.sim_engine.step(float(t_s))
+        sol = step_out.get("sol")
+        if sol is None:
+            raise RuntimeError("Solver returned None; this should not happen in the default wiring.")
+
         from gnss_twin.runtime.factory import build_epoch_log
 
-        step_out = self._engine.step(float(t))
-        sol = step_out.get("sol")
         epoch_log = build_epoch_log(
-            t_s=float(t),
+            t_s=float(t_s),
             step_out=step_out,
-            integrity_checker=self.integrity_checker,
-            attack_name=self.cfg.attack_name or "none",
+            integrity_checker=self.sim_engine.integrity_checker,
+            attack_name=self.attack_name,
         )
-        diagnostics = StepDiagnostics(
-            sats_used=epoch_log.sats_used or 0,
-            residual_rms=epoch_log.residual_rms_m if epoch_log.residual_rms_m is not None else float("nan"),
-            dop=sol.dop if sol is not None else None,
-            nis=epoch_log.nis,
-            flags=sol.fix_flags if sol is not None else None,
-            epoch_log=epoch_log,
-        )
-        return sol, diagnostics.__dict__
 
-    def run(self, t0: float, tf: float, dt: float) -> list[EpochLog]:
+        diagnostics = {
+            "sats_used": int(epoch_log.sats_used or 0),
+            "residual_rms": float(epoch_log.residual_rms_m or float("nan")),
+            "dop": sol.dop,
+            "nis": step_out.get("nis"),
+            "flags": sol.fix_flags,
+            "epoch_log": epoch_log,
+        }
+        return sol, diagnostics
+
+    def run(self, start_t_s: float, end_t_s: float, dt_s: float) -> list[EpochLog]:
         epochs: list[EpochLog] = []
-        times = np.arange(t0, tf, dt)
-        for t in times:
-            _, diagnostics = self.step(float(t))
-            epochs.append(diagnostics["epoch_log"])
+        t = float(start_t_s)
+        while t < float(end_t_s):
+            _, diag = self.step(t)
+            epochs.append(diag["epoch_log"])
+            t += float(dt_s)
         return epochs
