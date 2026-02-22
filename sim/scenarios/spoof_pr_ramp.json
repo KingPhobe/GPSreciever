@@ -1,0 +1,13 @@
+{
+  "name": "spoof_pr_ramp",
+  "duration_s": 60,
+  "rng_seed": 42,
+  "use_ekf": true,
+  "attack_name": "spoof_pr_ramp",
+  "attack_params": {
+    "start_t": 10.0,
+    "ramp_rate_mps": 15.0,
+    "auto_select_visible_sv": true,
+    "strict_target_sv": false
+  }
+}
