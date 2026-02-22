@@ -291,7 +291,13 @@ class MainWindow(QMainWindow):
         self.use_ekf_input.setChecked(True)
 
         self.attack_preset_input = QComboBox()
-        self.attack_preset_input.addItems(["none", "spoof_clock_ramp", "spoof_pr_ramp"])
+        self.attack_preset_input.addItems([
+            "none",
+            "jam_cn0_drop",
+            "spoof_clock_ramp",
+            "spoof_pr_ramp",
+            "spoof_pos_offset",
+        ])
         self.attack_preset_input.currentTextChanged.connect(self._update_attack_controls)
         self.attack_preset_input.currentTextChanged.connect(self._refresh_visible_svs)
 
@@ -312,6 +318,38 @@ class MainWindow(QMainWindow):
         self.slope_mps_input = QDoubleSpinBox()
         self.slope_mps_input.setRange(-1000.0, 1000.0)
         self.slope_mps_input.setValue(2.0)
+
+        # Position spoof controls (local N/E/U offset)
+        self.pos_north_m_input = QDoubleSpinBox()
+        self.pos_north_m_input.setRange(-1_000_000.0, 1_000_000.0)
+        self.pos_north_m_input.setDecimals(2)
+        self.pos_north_m_input.setValue(0.0)
+        self.pos_east_m_input = QDoubleSpinBox()
+        self.pos_east_m_input.setRange(-1_000_000.0, 1_000_000.0)
+        self.pos_east_m_input.setDecimals(2)
+        self.pos_east_m_input.setValue(0.0)
+        self.pos_up_m_input = QDoubleSpinBox()
+        self.pos_up_m_input.setRange(-1_000_000.0, 1_000_000.0)
+        self.pos_up_m_input.setDecimals(2)
+        self.pos_up_m_input.setValue(0.0)
+        self.pos_ramp_time_s_input = QDoubleSpinBox()
+        self.pos_ramp_time_s_input.setRange(0.0, 36000.0)
+        self.pos_ramp_time_s_input.setDecimals(2)
+        self.pos_ramp_time_s_input.setValue(0.0)
+
+        # Jamming controls
+        self.jam_cn0_drop_db_input = QDoubleSpinBox()
+        self.jam_cn0_drop_db_input.setRange(0.0, 60.0)
+        self.jam_cn0_drop_db_input.setDecimals(1)
+        self.jam_cn0_drop_db_input.setValue(15.0)
+        self.jam_sigma_pr_scale_input = QDoubleSpinBox()
+        self.jam_sigma_pr_scale_input.setRange(1.0, 100.0)
+        self.jam_sigma_pr_scale_input.setDecimals(2)
+        self.jam_sigma_pr_scale_input.setValue(5.0)
+        self.jam_sigma_prr_scale_input = QDoubleSpinBox()
+        self.jam_sigma_prr_scale_input.setRange(1.0, 100.0)
+        self.jam_sigma_prr_scale_input.setDecimals(2)
+        self.jam_sigma_prr_scale_input.setValue(5.0)
         self.start_t_input.valueChanged.connect(self._refresh_visible_svs)
         self.rng_seed_input.valueChanged.connect(self._refresh_visible_svs)
 
@@ -350,6 +388,13 @@ class MainWindow(QMainWindow):
         form.addRow(self.auto_select_label, self.auto_select_sv_checkbox)
         form.addRow(self.attack_window_label, time_window)
         form.addRow(self.ramp_rate_label, self.slope_mps_input)
+        form.addRow("pos_north_m", self.pos_north_m_input)
+        form.addRow("pos_east_m", self.pos_east_m_input)
+        form.addRow("pos_up_m", self.pos_up_m_input)
+        form.addRow("pos_ramp_time_s", self.pos_ramp_time_s_input)
+        form.addRow("jam_cn0_drop_db", self.jam_cn0_drop_db_input)
+        form.addRow("jam_sigma_pr_scale", self.jam_sigma_pr_scale_input)
+        form.addRow("jam_sigma_prr_scale", self.jam_sigma_prr_scale_input)
 
         self.init_button = QPushButton("Initialize / Reset")
         self.run_button = QPushButton("Run")
@@ -434,6 +479,10 @@ class MainWindow(QMainWindow):
     def _update_attack_controls(self) -> None:
         attack_name = self.attack_preset_input.currentText()
         is_ramp = attack_name in {"spoof_pr_ramp", "spoof_clock_ramp"}
+        is_position = attack_name in {"spoof_pos_offset"}
+        is_jam = attack_name in {"jam_cn0_drop"}
+        has_time_window = attack_name != "none" and not is_jam
+        has_start_only = is_jam
         for widget in [
             self.target_sv_label,
             self.target_sv_dropdown,
@@ -443,11 +492,28 @@ class MainWindow(QMainWindow):
         ]:
             widget.setVisible(attack_name == "spoof_pr_ramp")
         self.refresh_svs_btn.setEnabled(attack_name == "spoof_pr_ramp")
-        self.start_t_input.setEnabled(is_ramp)
-        self.t_end_input.setEnabled(is_ramp)
+        self.attack_window_label.setVisible(has_time_window or has_start_only)
+        self.start_t_input.setEnabled(attack_name != "none")
+        self.t_end_input.setEnabled(attack_name in {"spoof_pr_ramp", "spoof_clock_ramp", "spoof_pos_offset"})
+        self.t_end_input.setVisible(not has_start_only)
+
         self.slope_mps_input.setEnabled(is_ramp)
-        self.attack_window_label.setVisible(is_ramp)
         self.ramp_rate_label.setVisible(is_ramp)
+        self.slope_mps_input.setVisible(is_ramp)
+
+        for widget in [
+            self.pos_north_m_input,
+            self.pos_east_m_input,
+            self.pos_up_m_input,
+            self.pos_ramp_time_s_input,
+        ]:
+            widget.setVisible(is_position)
+        for widget in [
+            self.jam_cn0_drop_db_input,
+            self.jam_sigma_pr_scale_input,
+            self.jam_sigma_prr_scale_input,
+        ]:
+            widget.setVisible(is_jam)
 
     def _refresh_visible_svs(self) -> None:
         cfg = SimConfig(
@@ -513,6 +579,29 @@ class MainWindow(QMainWindow):
                 if resolved != chosen:
                     self.target_sv_dropdown.setCurrentText(resolved)
                 attack_params["target_sv"] = resolved
+                attack_params["auto_select_visible_sv"] = bool(self.auto_select_sv_checkbox.isChecked())
+                attack_params["strict_target_sv"] = False
+        elif attack_name == "spoof_pos_offset":
+            start_t = float(self.start_t_input.value())
+            t_end_val = float(self.t_end_input.value())
+            end_t = None if t_end_val < 0 else t_end_val
+            attack_params = {
+                "start_t": start_t,
+                "north_m": float(self.pos_north_m_input.value()),
+                "east_m": float(self.pos_east_m_input.value()),
+                "up_m": float(self.pos_up_m_input.value()),
+                "ramp_time_s": float(self.pos_ramp_time_s_input.value()),
+            }
+            if end_t is not None:
+                attack_params["end_t"] = end_t
+        elif attack_name == "jam_cn0_drop":
+            start_t = float(self.start_t_input.value())
+            attack_params = {
+                "start_t": start_t,
+                "cn0_drop_db": float(self.jam_cn0_drop_db_input.value()),
+                "sigma_pr_scale": float(self.jam_sigma_pr_scale_input.value()),
+                "sigma_prr_scale": float(self.jam_sigma_prr_scale_input.value()),
+            }
         return SimConfig(
             duration=float(self.duration_s_input.value()),
             dt=float(self.dt_s_input.value()),
@@ -532,6 +621,7 @@ class MainWindow(QMainWindow):
         self.engine, self.receiver_truth_state = build_engine_with_truth(self.cfg)
         self.t_s_current = 0.0
         self.epochs = []
+        self.meas_log_rows = []  # per-SV measurement audit log for post-analysis
         self.frame = pd.DataFrame()
         self.nmea.reset()
         self.nmea_t0_utc = datetime.now(timezone.utc)
@@ -584,6 +674,7 @@ class MainWindow(QMainWindow):
             attack_name=self.cfg.attack_name or "none",
         )
         self.epochs.append(epoch)
+        self._append_meas_log(step_out, epoch)
         self.frame = epochs_to_frame(self.epochs)
         self._step_nmea(float(self.t_s_current), epoch, step_out)
 
@@ -744,6 +835,13 @@ class MainWindow(QMainWindow):
             df["attack_ramp_rate_mps"] = attack_params.get("ramp_rate_mps", "")
             target_sv = attack_params.get("target_sv", "") if attack_name == "spoof_pr_ramp" else ""
             df["attack_target_sv"] = target_sv
+            df["attack_pos_north_m"] = attack_params.get("north_m", "")
+            df["attack_pos_east_m"] = attack_params.get("east_m", "")
+            df["attack_pos_up_m"] = attack_params.get("up_m", "")
+            df["attack_pos_ramp_time_s"] = attack_params.get("ramp_time_s", "")
+            df["attack_jam_cn0_drop_db"] = attack_params.get("cn0_drop_db", "")
+            df["attack_jam_sigma_pr_scale"] = attack_params.get("sigma_pr_scale", "")
+            df["attack_jam_sigma_prr_scale"] = attack_params.get("sigma_prr_scale", "")
             df["attack_config_ok"] = bool(self.attack_config_ok)
             df["attack_config_msg"] = self.attack_config_msg
             add_nmea_metadata_columns(df, self.cfg)
@@ -751,6 +849,9 @@ class MainWindow(QMainWindow):
             add_nmea_metadata_columns(df, SimConfig())
         self.frame = df
         df.to_csv(run_dir / "run_table.csv", index=False)
+        if getattr(self, "meas_log_rows", None):
+            meas_path = run_dir / "meas_log.csv"
+            pd.DataFrame(self.meas_log_rows).to_csv(meas_path, index=False)
         plot_update(df, out_dir=run_dir, run_name=None)
         (run_dir / "nmea_output.nmea").write_text(
             "".join(f"{emit.nmea_sentence}\r\n" for emit in self.nmea_buffer),
@@ -818,6 +919,49 @@ class MainWindow(QMainWindow):
                 "confirm target SV is visible at start_t."
             ),
         )
+
+    def _append_meas_log(self, step_out: dict, epoch) -> None:
+        """Append per-SV measurement telemetry for debugging/validation."""
+
+        try:
+            raw = {m.sv_id: m for m in step_out.get("meas_raw", [])}
+            attacked = {m.sv_id: m for m in step_out.get("meas_attacked", [])}
+            sol = step_out.get("sol")
+            used = set(sol.fix_flags.sv_used) if sol is not None else set()
+            rejected = set(sol.fix_flags.sv_rejected) if sol is not None else set()
+            t_s = epoch.t_s if getattr(epoch, "t_s", None) is not None else epoch.t
+            for sv_id, meas_a in attacked.items():
+                meas_r = raw.get(sv_id)
+                pr_raw = meas_r.pr_m if meas_r is not None else float("nan")
+                prr_raw = meas_r.prr_mps if meas_r is not None else float("nan")
+                pr_bias = meas_a.pr_m - pr_raw if meas_r is not None else float("nan")
+                prr_bias = (
+                    meas_a.prr_mps - prr_raw
+                    if (meas_r is not None and meas_a.prr_mps is not None)
+                    else float("nan")
+                )
+                self.meas_log_rows.append(
+                    {
+                        "t_s": t_s,
+                        "sv_id": sv_id,
+                        "elev_deg": meas_a.elev_deg,
+                        "az_deg": meas_a.az_deg,
+                        "cn0_dbhz": meas_a.cn0_dbhz,
+                        "sigma_pr_m": meas_a.sigma_pr_m,
+                        "pr_raw_m": pr_raw,
+                        "pr_attacked_m": meas_a.pr_m,
+                        "pr_bias_m": pr_bias,
+                        "prr_raw_mps": prr_raw,
+                        "prr_attacked_mps": (
+                            meas_a.prr_mps if meas_a.prr_mps is not None else float("nan")
+                        ),
+                        "prr_bias_mps": prr_bias,
+                        "used_in_solution": int(sv_id in used),
+                        "rejected": int(sv_id in rejected),
+                    }
+                )
+        except Exception:
+            return
 
 
 def main() -> None:
