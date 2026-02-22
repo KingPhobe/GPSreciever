@@ -102,7 +102,7 @@ def create_attack(name: str, params: dict) -> AttackModel:
             auto_select_visible_sv=auto_select_visible_sv,
             strict_target_sv=strict_target_sv,
         )
-    if lowered == "spoof_position_offset":
+    if lowered in {"spoof_pos_offset", "spoof_position_offset"}:
         unknown = set(params) - {
             "start_t",
             "end_t",
@@ -114,7 +114,7 @@ def create_attack(name: str, params: dict) -> AttackModel:
         }
         if unknown:
             warnings.warn(
-                f"Unknown spoof_position_offset attack params: {sorted(unknown)}",
+                f"Unknown spoof_pos_offset attack params: {sorted(unknown)}",
                 stacklevel=2,
             )
         end_t = params.get("end_t", params.get("t_end"))
