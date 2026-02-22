@@ -1,19 +1,27 @@
 # GNSS Twin
 
-Minimal GNSS digital twin package with demo scripts and test coverage for Phase 1 (static GPS receiver) simulation.
+Minimal GNSS digital twin package with demo scripts, a desktop GUI, and headless scenario runners for batch analysis.
 
 ## Overview
 
-GNSS Twin simulates a simplified GPS constellation, generates synthetic pseudorange measurements, and runs a navigation
-pipeline with integrity checks. The stack includes measurement modeling (iono/tropo/multipath/noise), WLS navigation with
-optional EKF smoothing, RAIM-style integrity, logging/plotting utilities, and scenario runners for batch analysis.
+GNSS Twin simulates a simplified GNSS constellation, generates synthetic pseudorange / pseudorange-rate measurements, and runs a navigation
+pipeline with integrity checks. The stack includes measurement modeling (iono/tropo/multipath/noise), WLS navigation with optional EKF
+smoothing, RAIM-style integrity, logging/plotting utilities, and scenario runners for repeatable analysis.
 
-For a detailed walkthrough of the current functionality and modules, see [`docs/PROJECT_DOCUMENTATION.md`](docs/PROJECT_DOCUMENTATION.md).
+For a deeper module-by-module description, see `docs/PROJECT_DOCUMENTATION.md`.
 
 ## Setup
 
+Create a virtual environment (recommended) and install:
+
 ```bash
-make install
+python -m venv .venv
+# Windows:
+.venv\Scripts\activate
+# Linux/macOS:
+source .venv/bin/activate
+
+pip install -e ".[dev]"
 ```
 
 ## Quickstart
