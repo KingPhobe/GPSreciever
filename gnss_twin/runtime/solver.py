@@ -1,8 +1,15 @@
 """Default PVT solver implementation used by runtime engines.
 
-This module is intentionally "runtime-facing": it wraps the lower-level WLS and integrity
-solvers and optionally smooths the solution with an EKF. It also exposes per-epoch
-diagnostics (WLS cache, NIS, innovation dimension) for logging and integrity reuse.
+Runtime-facing wrapper that:
+  * runs WLS PVT
+  * optional post-fit residual gating (single-SV removal)
+  * RAIM/integrity (via integrity_pvt)
+  * optional EKF smoothing + exposes diagnostics (NIS / innovation dimension)
+
+The SimulationEngine expects the solver instance to expose:
+  - last_wls
+  - last_nis
+  - last_innov_dim
 """
 
 from __future__ import annotations
@@ -26,12 +33,15 @@ class DefaultPvtSolver:
         self.cfg = cfg
         self.integrity_cfg = IntegrityConfig()
         self.tracker = SvTracker(self.integrity_cfg)
+
+        # Start slightly off from truth to avoid trivial convergence in demos.
         self.last_pos = np.array(initial_pos, dtype=float) + 100.0
         self.last_clk = float(initial_clk)
         self.last_t_s: float | None = None
 
         self.ekf: EkfNav | None = EkfNav() if cfg.use_ekf else None
 
+        # Cached per-epoch diagnostics.
         self.last_wls: Optional[WlsPvtResult] = None
         self.last_nis: float | None = None
         self.last_innov_dim: int | None = None
@@ -43,6 +53,7 @@ class DefaultPvtSolver:
         *,
         t_s: float | None = None,
     ) -> PvtSolution | None:
+        # Reset per-epoch cached diagnostics.
         self.last_wls = None
         self.last_nis = None
         self.last_innov_dim = None
