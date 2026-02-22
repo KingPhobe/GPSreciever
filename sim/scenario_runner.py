@@ -114,7 +114,7 @@ def _load_epoch_rows(path: Path) -> list[dict[str, str]]:
 def _positions_from_rows(rows: list[dict[str, str]]) -> np.ndarray:
     positions = []
     for row in rows:
-        values = [_parse_float(row.get(key)) for key in ("pos_x", "pos_y", "pos_z")]
+        values = [_parse_float(row.get(key)) for key in ("pos_ecef_x", "pos_ecef_y", "pos_ecef_z")]
         if all(value is not None and math.isfinite(value) for value in values):
             positions.append(values)
     if not positions:
