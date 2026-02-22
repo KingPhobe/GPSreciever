@@ -14,6 +14,7 @@ from typing import Any
 import numpy as np
 
 from gnss_twin.config import SimConfig
+from gnss_twin.logger import load_epochs_npz
 from sim.run_static_demo import run_static_demo
 
 
@@ -41,7 +42,7 @@ def run_scenarios(
             **metrics,
         }
         summary_path = run_dir / "summary.json"
-        summary_path.write_text(json.dumps(summary, indent=2))
+        summary_path.write_text(json.dumps(_sanitize_json(summary), indent=2, allow_nan=False))
         summaries.append(summary)
         _append_summary_csv(run_root / "summary.csv", summary)
 
@@ -78,8 +79,13 @@ def _build_sim_config(scenario: dict[str, Any]) -> SimConfig:
 
 def _summary_from_epoch_logs(path: Path, *, attack_start_t: float | None = None) -> dict[str, float]:
     rows = _load_epoch_rows(path)
-    pos = _positions_from_rows(rows)
-    pos_err_rms = _wander_rms(pos)
+
+    # Prefer truth-based RMS error (epoch_logs.npz) when available.
+    npz_path = path.with_suffix(".npz")
+    pos_err_rms = _pos_error_rms_from_npz(npz_path)
+    if not math.isfinite(pos_err_rms):
+        pos = _positions_from_rows(rows)
+        pos_err_rms = _wander_rms(pos)
     residual_rms = _float_column(rows, "residual_rms_m")
     sats_used = _float_column(rows, "sats_used")
     nis_alarm = _float_column(rows, "nis_alarm")
@@ -103,6 +109,56 @@ def _summary_from_epoch_logs(path: Path, *, attack_start_t: float | None = None)
     }
 
 
+def _pos_error_rms_from_npz(npz_path: Path) -> float:
+    """Compute RMS position error using truth from epoch_logs.npz.
+
+    Returns NaN if NPZ is missing or does not contain solution+truth.
+    """
+
+    if not npz_path.exists():
+        return float("nan")
+    try:
+        epochs = load_epochs_npz(npz_path)
+    except Exception:
+        return float("nan")
+
+    errors: list[float] = []
+    for epoch in epochs:
+        sol = epoch.get("solution")
+        truth = epoch.get("truth")
+        if not isinstance(sol, dict) or not isinstance(truth, dict):
+            continue
+        pos = sol.get("pos_ecef")
+        tpos = truth.get("pos_ecef_m")
+        if pos is None or tpos is None:
+            continue
+        try:
+            p = np.array(pos, dtype=float).reshape(3)
+            tp = np.array(tpos, dtype=float).reshape(3)
+        except Exception:
+            continue
+        if not np.isfinite(p).all() or not np.isfinite(tp).all():
+            continue
+        errors.append(float(np.linalg.norm(p - tp)))
+
+    if not errors:
+        return float("nan")
+    arr = np.array(errors, dtype=float)
+    return float(np.sqrt(np.mean(arr**2)))
+
+
+def _sanitize_json(obj: Any) -> Any:
+    """Replace NaN/Inf floats with None so JSON is standards-compliant."""
+
+    if isinstance(obj, float):
+        return None if (math.isnan(obj) or math.isinf(obj)) else obj
+    if isinstance(obj, dict):
+        return {k: _sanitize_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_json(v) for v in obj]
+    return obj
+
+
 def _load_epoch_rows(path: Path) -> list[dict[str, str]]:
     if not path.exists():
         raise FileNotFoundError(f"Epoch log not found: {path}")
@@ -112,9 +168,13 @@ def _load_epoch_rows(path: Path) -> list[dict[str, str]]:
 
 
 def _positions_from_rows(rows: list[dict[str, str]]) -> np.ndarray:
+    """Extract estimated ECEF positions from epoch_logs.csv rows.
+
+    Supports both legacy (pos_x/pos_y/pos_z) and current (pos_ecef_x/...) column names.
+    """
+
     positions = []
     for row in rows:
-        # Backwards-compatible: older logs used pos_x/pos_y/pos_z.
         if "pos_ecef_x" in row:
             keys = ("pos_ecef_x", "pos_ecef_y", "pos_ecef_z")
         else:
