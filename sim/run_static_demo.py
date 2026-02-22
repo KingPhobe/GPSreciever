@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import random
 import warnings
 from dataclasses import replace
@@ -76,6 +77,7 @@ def run_static_demo(
             print(f"{len(visible)} visible satellites at t={t}s")
 
     epochs = []
+    meas_log_rows: list[dict[str, object]] = []
     nmea = NeoM8nNmeaOutput(rate_hz=1.0, talker="GN")
     nmea_emits: list[NmeaEmit] = []
     t0_utc = datetime.now(timezone.utc)
@@ -83,6 +85,45 @@ def run_static_demo(
     attack_name = cfg.attack_name or "none"
     for t in times:
         step = engine.step(float(t))
+        # Per-SV measurement audit log (raw vs attacked) for offline validation/debug.
+        try:
+            raw = {m.sv_id: m for m in step.get("meas_raw", [])}
+            attacked = {m.sv_id: m for m in step.get("meas_attacked", [])}
+            sol = step.get("sol")
+            used = set(sol.fix_flags.sv_used) if sol is not None else set()
+            rejected = set(sol.fix_flags.sv_rejected) if sol is not None else set()
+            for sv_id, meas_a in attacked.items():
+                meas_r = raw.get(sv_id)
+                pr_raw = meas_r.pr_m if meas_r is not None else float("nan")
+                prr_raw = meas_r.prr_mps if meas_r is not None else float("nan")
+                pr_bias = meas_a.pr_m - pr_raw if meas_r is not None else float("nan")
+                prr_bias = (
+                    (meas_a.prr_mps - prr_raw)
+                    if (meas_r is not None and meas_a.prr_mps is not None)
+                    else float("nan")
+                )
+                meas_log_rows.append(
+                    {
+                        "t_s": float(t),
+                        "sv_id": sv_id,
+                        "elev_deg": meas_a.elev_deg,
+                        "az_deg": meas_a.az_deg,
+                        "cn0_dbhz": meas_a.cn0_dbhz,
+                        "sigma_pr_m": meas_a.sigma_pr_m,
+                        "pr_raw_m": pr_raw,
+                        "pr_attacked_m": meas_a.pr_m,
+                        "pr_bias_m": pr_bias,
+                        "prr_raw_mps": prr_raw,
+                        "prr_attacked_mps": (
+                            meas_a.prr_mps if meas_a.prr_mps is not None else float("nan")
+                        ),
+                        "prr_bias_mps": prr_bias,
+                        "used_in_solution": int(sv_id in used),
+                        "rejected": int(sv_id in rejected),
+                    }
+                )
+        except Exception:
+            pass
         epoch_log = build_epoch_log(
             t_s=float(t),
             step_out=step,
@@ -263,6 +304,30 @@ def run_static_demo(
                 "nmea_talker": "GN",
             }
         )
+    # Save per-SV measurement audit log.
+    if meas_log_rows:
+        import pandas as pd
+
+        pd.DataFrame(meas_log_rows).to_csv(output_dir / "meas_log.csv", index=False)
+
+    # Run manifest: run config + environment.
+    try:
+        import platform
+        import sys
+        from dataclasses import asdict
+
+        manifest = {
+            "created_utc": datetime.now(timezone.utc).isoformat(),
+            "cfg": asdict(cfg),
+            "python": sys.version,
+            "platform": platform.platform(),
+        }
+        (output_dir / "run_manifest.json").write_text(
+            json.dumps(manifest, indent=2),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
     return output_dir / "epoch_logs.csv"
 
 
