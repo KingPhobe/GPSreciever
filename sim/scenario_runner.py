@@ -114,7 +114,12 @@ def _load_epoch_rows(path: Path) -> list[dict[str, str]]:
 def _positions_from_rows(rows: list[dict[str, str]]) -> np.ndarray:
     positions = []
     for row in rows:
-        values = [_parse_float(row.get(key)) for key in ("pos_ecef_x", "pos_ecef_y", "pos_ecef_z")]
+        # Backwards-compatible: older logs used pos_x/pos_y/pos_z.
+        if "pos_ecef_x" in row:
+            keys = ("pos_ecef_x", "pos_ecef_y", "pos_ecef_z")
+        else:
+            keys = ("pos_x", "pos_y", "pos_z")
+        values = [_parse_float(row.get(key)) for key in keys]
         if all(value is not None and math.isfinite(value) for value in values):
             positions.append(values)
     if not positions:
@@ -250,8 +255,62 @@ def main() -> None:
         action="store_true",
         help="Disable saving run plots.",
     )
+
+    # Monte Carlo mode (still scenario-style: headless runs producing CSV/plots).
+    parser.add_argument(
+        "--monte-carlo",
+        type=int,
+        default=0,
+        help="If >0, run Monte Carlo for each scenario with N seeds.",
+    )
+    parser.add_argument(
+        "--mc-seed-mode",
+        type=str,
+        default="offset",
+        choices=["offset", "absolute"],
+        help="Seed mode: offset uses scenario rng_seed as base; absolute uses mc-seed-start directly.",
+    )
+    parser.add_argument(
+        "--mc-seed-start",
+        type=int,
+        default=0,
+        help="Seed start (offset or absolute depending on mc-seed-mode).",
+    )
+    parser.add_argument(
+        "--mc-seed-step",
+        type=int,
+        default=1,
+        help="Seed stride for Monte Carlo.",
+    )
+    parser.add_argument(
+        "--mc-per-run-plots",
+        action="store_true",
+        help="Save plots for each MC seed run (can be heavy).",
+    )
+    parser.add_argument(
+        "--mc-no-aggregate-plots",
+        action="store_true",
+        help="Disable aggregate histogram plots for Monte Carlo.",
+    )
     args = parser.parse_args()
     scenario_paths = [Path(path) for path in args.scenarios]
+
+    if int(args.monte_carlo) > 0:
+        from sim.validation.monte_carlo import run_monte_carlo
+
+        for scenario_path in scenario_paths:
+            run_monte_carlo(
+                scenario_path,
+                n=int(args.monte_carlo),
+                seed_mode=str(args.mc_seed_mode),
+                seed_start=int(args.mc_seed_start),
+                seed_step=int(args.mc_seed_step),
+                run_root=Path(args.run_root),
+                per_run_plots=bool(args.mc_per_run_plots),
+                aggregate_plots=not bool(args.mc_no_aggregate_plots),
+            )
+        return
+
     run_scenarios(scenario_paths, run_root=Path(args.run_root), save_figs=not args.no_plots)
 
 
