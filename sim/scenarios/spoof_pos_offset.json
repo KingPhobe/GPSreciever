@@ -1,0 +1,14 @@
+{
+  "name": "spoof_pos_offset",
+  "duration_s": 60,
+  "rng_seed": 42,
+  "use_ekf": true,
+  "attack_name": "spoof_pos_offset",
+  "attack_params": {
+    "start_t": 10.0,
+    "north_m": 60.0,
+    "east_m": 25.0,
+    "up_m": 0.0,
+    "ramp_time_s": 5.0
+  }
+}
