@@ -28,6 +28,17 @@ EPOCH_CSV_COLUMNS = [
     "vel_ecef_z",
     "clk_bias_s",
     "clk_drift_sps",
+    "truth_pos_ecef_x",
+    "truth_pos_ecef_y",
+    "truth_pos_ecef_z",
+    "truth_vel_ecef_x",
+    "truth_vel_ecef_y",
+    "truth_vel_ecef_z",
+    "truth_clk_bias_s",
+    "truth_clk_drift_sps",
+    "pos_error_m",
+    "clk_bias_error_s",
+    "clk_drift_error_sps",
     "nis",
     "nis_alarm",
     "attack_name",
@@ -103,9 +114,22 @@ def load_epochs_npz(path: str | Path) -> list[dict]:
 
 def _epoch_to_csv_line(epoch: EpochLog) -> str:
     solution = epoch.solution
+    truth = epoch.truth
     t_s = epoch.t_s if epoch.t_s is not None else epoch.t
     pos = _resolve_vector(epoch.pos_ecef, solution.pos_ecef if solution is not None else None)
     vel = _resolve_vector(epoch.vel_ecef, solution.vel_ecef if solution is not None else None)
+    truth_pos = _resolve_vector(None, truth.pos_ecef_m if truth is not None else None)
+    truth_vel = _resolve_vector(None, truth.vel_ecef_mps if truth is not None else None)
+
+    pos_error_m = None
+    clk_bias_error_s = None
+    clk_drift_error_sps = None
+    if solution is not None and truth is not None:
+        if np.isfinite(solution.pos_ecef).all() and np.isfinite(truth.pos_ecef_m).all():
+            pos_error_m = float(np.linalg.norm(solution.pos_ecef - truth.pos_ecef_m))
+        clk_bias_error_s = float(solution.clk_bias_s - truth.clk_bias_s)
+        clk_drift_error_sps = float(solution.clk_drift_sps - truth.clk_drift_sps)
+
     dop = solution.dop if solution is not None else None
     residuals = solution.residuals if solution is not None else None
     flags = solution.fix_flags if solution is not None else None
@@ -157,6 +181,17 @@ def _epoch_to_csv_line(epoch: EpochLog) -> str:
         _format_value(
             epoch.clk_drift_sps if epoch.clk_drift_sps is not None else (solution.clk_drift_sps if solution else None)
         ),
+        _format_value(truth_pos[0]),
+        _format_value(truth_pos[1]),
+        _format_value(truth_pos[2]),
+        _format_value(truth_vel[0]),
+        _format_value(truth_vel[1]),
+        _format_value(truth_vel[2]),
+        _format_value(truth.clk_bias_s if truth is not None else None),
+        _format_value(truth.clk_drift_sps if truth is not None else None),
+        _format_value(pos_error_m),
+        _format_value(clk_bias_error_s),
+        _format_value(clk_drift_error_sps),
         _format_value(epoch.nis),
         _format_value(int(epoch.nis_alarm)),
         epoch.attack_name or "",
