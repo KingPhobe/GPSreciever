@@ -29,3 +29,11 @@ class SimConfig:
     use_ekf: bool = False
     attack_name: str | None = None
     attack_params: dict[str, float | str] = field(default_factory=dict)
+
+    # --- Detection / telemetry knobs ---
+    # These defaults are intentionally conservative for demos.
+    # They should be tuned once you have realistic receiver/clock models.
+    nis_alarm_include_attack_active: bool = False
+    # Flag a clock anomaly if the estimated receiver clock drift magnitude exceeds this threshold.
+    # Units: seconds/second (s/s). Rough conversion: drift_mps ≈ drift_sps * c.
+    clock_drift_alarm_sps: float = 5e-8
