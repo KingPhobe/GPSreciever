@@ -2,7 +2,13 @@ import numpy as np
 
 import warnings
 
-from gnss_twin.attacks import AttackPipeline, SpoofClockRampAttack, SpoofPrRampAttack, create_attack
+from gnss_twin.attacks import (
+    AttackPipeline,
+    SpoofClockRampAttack,
+    SpoofPositionOffsetAttack,
+    SpoofPrRampAttack,
+    create_attack,
+)
 from gnss_twin.models import GnssMeasurement, ReceiverTruth, SvState
 
 
@@ -218,3 +224,45 @@ def test_spoof_pr_ramp_auto_selects_visible_sv_and_applies() -> None:
     assert attacked[1].sv_id == "G01"
     assert attacked[1].pr_m == 1_100.0 + (3.0 - 1.0) * 2.0
     assert attacked[1].prr_mps == 1.0 + 2.0
+
+
+def test_spoof_position_offset_attack_applies_bias() -> None:
+    attack = SpoofPositionOffsetAttack(start_t=1.0, north_m=10.0, east_m=0.0, up_m=0.0)
+    rx_truth = _make_rx_truth()
+    sv_state = _make_sv_state("G01", 2.0)
+    meas = _make_measurement(sv_id="G01", t=2.0, pr_m=10_000.0, prr_mps=0.0)
+
+    modified, delta = attack.apply(meas, sv_state, rx_truth=rx_truth)
+
+    assert delta.applied
+    assert modified.pr_m == meas.pr_m + delta.pr_bias_m
+    assert modified.prr_mps == meas.prr_mps
+    assert abs(delta.pr_bias_m) > 0.0
+
+
+def test_spoof_position_offset_attack_ramp_adds_prr_bias() -> None:
+    attack = SpoofPositionOffsetAttack(start_t=1.0, north_m=20.0, ramp_time_s=4.0)
+    rx_truth = _make_rx_truth()
+    sv_state = _make_sv_state("G01", 3.0)
+    meas = _make_measurement(sv_id="G01", t=3.0, pr_m=10_000.0, prr_mps=5.0)
+
+    modified, delta = attack.apply(meas, sv_state, rx_truth=rx_truth)
+
+    assert delta.applied
+    assert modified.prr_mps is not None
+    assert modified.prr_mps == meas.prr_mps + delta.prr_bias_mps
+    assert delta.prr_bias_mps != 0.0
+
+
+def test_create_attack_returns_spoof_position_offset() -> None:
+    attack = create_attack(
+        "spoof_position_offset",
+        {"start_t": 10.0, "north_m": 1.0, "east_m": 2.0, "up_m": 3.0, "ramp_time_s": 5.0},
+    )
+
+    assert isinstance(attack, SpoofPositionOffsetAttack)
+    assert attack.start_t == 10.0
+    assert attack.north_m == 1.0
+    assert attack.east_m == 2.0
+    assert attack.up_m == 3.0
+    assert attack.ramp_time_s == 5.0
