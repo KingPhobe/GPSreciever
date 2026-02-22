@@ -1,12 +1,8 @@
 """Default PVT solver implementation used by runtime engines.
 
-This module is intentionally runtime-facing. It wraps a WLS PVT solution with:
-  * optional post-fit residual gating (single-sv removal)
-  * RAIM/integrity logic (via integrity_pvt)
-  * optional EKF smoothing and diagnostics (NIS / innovation dimension)
-
-The SimulationEngine expects the solver instance to expose `last_wls`, `last_nis`,
-and `last_innov_dim` for logging/validation.
+This module is intentionally "runtime-facing": it wraps the lower-level WLS and integrity
+solvers and optionally smooths the solution with an EKF. It also exposes per-epoch
+diagnostics (WLS cache, NIS, innovation dimension) for logging and integrity reuse.
 """
 
 from __future__ import annotations
@@ -30,15 +26,12 @@ class DefaultPvtSolver:
         self.cfg = cfg
         self.integrity_cfg = IntegrityConfig()
         self.tracker = SvTracker(self.integrity_cfg)
-
-        # Start slightly off from truth to avoid trivial convergence in demos.
         self.last_pos = np.array(initial_pos, dtype=float) + 100.0
         self.last_clk = float(initial_clk)
         self.last_t_s: float | None = None
 
         self.ekf: EkfNav | None = EkfNav() if cfg.use_ekf else None
 
-        # Cached per-epoch diagnostics.
         self.last_wls: Optional[WlsPvtResult] = None
         self.last_nis: float | None = None
         self.last_innov_dim: int | None = None
@@ -50,18 +43,15 @@ class DefaultPvtSolver:
         *,
         t_s: float | None = None,
     ) -> PvtSolution | None:
-        # Reset per-epoch cached diagnostics.
         self.last_wls = None
         self.last_nis = None
         self.last_innov_dim = None
 
         used_meas = list(measurements)
 
-        # Elevation mask aligns with integrity settings.
         elev_mask = float(self.integrity_cfg.elevation_mask_deg)
         masked_meas = [m for m in used_meas if float(m.elev_deg) >= elev_mask]
 
-        # 1) WLS on masked set.
         wls_solution: WlsPvtResult | None = None
         if len(masked_meas) >= 4:
             wls_solution = wls_pvt(
@@ -70,8 +60,6 @@ class DefaultPvtSolver:
                 initial_pos_ecef_m=self.last_pos,
                 initial_clk_bias_s=self.last_clk,
             )
-
-            # 1b) Optional single-SV post-fit residual gate.
             if wls_solution is not None:
                 sigmas_by_sv = {m.sv_id: float(m.sigma_pr_m) for m in masked_meas}
                 offender = postfit_gate(
@@ -82,7 +70,6 @@ class DefaultPvtSolver:
                 if offender:
                     used_meas = [m for m in used_meas if m.sv_id != offender]
                     masked_meas = [m for m in masked_meas if m.sv_id != offender]
-
                     wls_solution = None
                     if len(masked_meas) >= 4:
                         wls_solution = wls_pvt(
@@ -94,7 +81,6 @@ class DefaultPvtSolver:
 
         self.last_wls = wls_solution
 
-        # 2) Integrity/RAIM. We pass WLS to avoid duplicate compute.
         solution, _ = integrity_pvt(
             used_meas,
             sv_states,
@@ -104,8 +90,6 @@ class DefaultPvtSolver:
             tracker=self.tracker,
             precomputed=wls_solution,
         )
-
-        # 3) Optional EKF smoothing with diagnostics.
         if self.ekf is not None:
             dt = float(self.cfg.dt)
             if self.last_t_s is not None and t_s is not None:
@@ -118,7 +102,6 @@ class DefaultPvtSolver:
                 self.ekf.predict(dt)
 
             if self.ekf.initialized:
-                # EKF updates should run on the same masked set as WLS/integrity.
                 self.ekf.update_pseudorange(
                     masked_meas,
                     sv_states,
@@ -130,7 +113,6 @@ class DefaultPvtSolver:
                 self.last_nis = self.ekf.last_nis
                 self.last_innov_dim = self.ekf.last_innov_dim
 
-                # Keep DOP/residuals/fix_flags from integrity result.
                 solution = PvtSolution(
                     pos_ecef=self.ekf.pos_ecef_m.copy(),
                     vel_ecef=self.ekf.vel_ecef_mps.copy(),
@@ -142,8 +124,6 @@ class DefaultPvtSolver:
                 )
 
         self.last_t_s = t_s
-
-        # 4) Feedback for next epoch initialization.
         if solution.fix_flags.fix_type != "NO FIX" and np.isfinite(solution.pos_ecef).all():
             self.last_pos = solution.pos_ecef
             self.last_clk = float(solution.clk_bias_s)
