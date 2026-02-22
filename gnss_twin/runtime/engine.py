@@ -176,7 +176,6 @@ class SimulationEngine:
         # Expose solver diagnostics (optional) for logging/metrics.
         output["nis"] = getattr(self.solver, "last_nis", None)
         output["innov_dim"] = getattr(self.solver, "last_innov_dim", None)
-
         if self.logger is not None:
             self.logger(output)
         self._update_last_state(sol, t_s)
