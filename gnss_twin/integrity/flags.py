@@ -167,7 +167,10 @@ def integrity_pvt(
         and dop.pdop <= cfg.pdop_max
         and dop.gdop <= cfg.gdop_max
     )
-    valid = mask_ok and dop_ok and chi_square_ok and residual_ok and (len(rejected) == 0)
+    # NOTE: FDE (excluding one or more satellites) is a *mitigation* step.
+    # If the post-mitigation solution passes RAIM / residual / DOP checks, we treat the fix as valid.
+    # We still expose sv_rejected + validity_reason for telemetry/debug.
+    valid = mask_ok and dop_ok and chi_square_ok and residual_ok
     validity_reason = "ok"
     if not mask_ok:
         validity_reason = "insufficient_masked_sv"
@@ -175,10 +178,11 @@ def integrity_pvt(
         validity_reason = "dop_limit"
     elif not chi_square_ok:
         validity_reason = "raim_failed"
-    elif rejected:
-        validity_reason = "sv_rejected"
     elif not residual_ok:
         validity_reason = "max_residual_exceeded"
+    elif rejected:
+        # Fix is valid, but required excluding SV(s) this epoch.
+        validity_reason = "ok_with_sv_rejected"
     fix_type = _fix_type(len(used), dop, cfg)
 
     for meas in used:

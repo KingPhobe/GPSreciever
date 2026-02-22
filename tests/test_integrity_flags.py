@@ -90,7 +90,8 @@ def test_integrity_rejects_outlier() -> None:
 
     assert measurements[target_idx].sv_id in fde_solution.fix_flags.sv_rejected
     assert fde_solution.residuals.max_m < baseline_solution.residuals.max_m
-    assert not fde_solution.fix_flags.valid
+    assert fde_solution.fix_flags.valid
+    assert fde_solution.fix_flags.validity_reason == "ok_with_sv_rejected"
     assert not baseline_solution.fix_flags.valid
 
 
