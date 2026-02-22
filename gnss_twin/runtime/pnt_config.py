@@ -31,8 +31,11 @@ def default_pnt_config() -> PntConfig:
         reacq_confirm_s=5.0,  # PLACEHOLDER — tune with Rcubed
         min_sats_valid=5,  # PLACEHOLDER — tune with Rcubed
         max_pdop_valid=6.0,  # PLACEHOLDER — tune with Rcubed
-        residual_rms_suspect=3.0,  # PLACEHOLDER — tune with Rcubed
-        residual_rms_invalid=6.0,  # PLACEHOLDER — tune with Rcubed
+        # NOTE: In the current simulation, post-fit pseudorange residual RMS is typically
+        # ~4–13 m in nominal runs (depending on the sigma model). Use thresholds that keep
+        # baseline CONOPS in VALID and reserve INVALID for clearly-bad conditions.
+        residual_rms_suspect=10.0,  # PLACEHOLDER — tune with Rcubed
+        residual_rms_invalid=15.0,  # PLACEHOLDER — tune with Rcubed
         chi2_p_suspect=0.05,  # PLACEHOLDER — tune with Rcubed
         chi2_p_invalid=0.01,  # PLACEHOLDER — tune with Rcubed
         clock_innov_suspect=1e3,  # PLACEHOLDER — tune with Rcubed
