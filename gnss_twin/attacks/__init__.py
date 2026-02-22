@@ -9,7 +9,11 @@ import warnings
 from gnss_twin.attacks.base import AttackDelta, AttackModel
 from gnss_twin.attacks.jamming import JamCn0DropAttack
 from gnss_twin.attacks.pipeline import AttackPipeline
-from gnss_twin.attacks.spoofing import SpoofClockRampAttack, SpoofPrRampAttack
+from gnss_twin.attacks.spoofing import (
+    SpoofClockRampAttack,
+    SpoofPositionOffsetAttack,
+    SpoofPrRampAttack,
+)
 
 if TYPE_CHECKING:
     from gnss_twin.models import GnssMeasurement, ReceiverTruth, SvState
@@ -98,6 +102,30 @@ def create_attack(name: str, params: dict) -> AttackModel:
             auto_select_visible_sv=auto_select_visible_sv,
             strict_target_sv=strict_target_sv,
         )
+    if lowered == "spoof_position_offset":
+        unknown = set(params) - {
+            "start_t",
+            "end_t",
+            "north_m",
+            "east_m",
+            "up_m",
+            "ramp_time_s",
+            "t_end",
+        }
+        if unknown:
+            warnings.warn(
+                f"Unknown spoof_position_offset attack params: {sorted(unknown)}",
+                stacklevel=2,
+            )
+        end_t = params.get("end_t", params.get("t_end"))
+        return SpoofPositionOffsetAttack(
+            start_t=float(params.get("start_t", 20.0)),
+            end_t=(float(end_t) if end_t is not None else None),
+            north_m=float(params.get("north_m", 0.0)),
+            east_m=float(params.get("east_m", 0.0)),
+            up_m=float(params.get("up_m", 0.0)),
+            ramp_time_s=float(params.get("ramp_time_s", 0.0)),
+        )
     if lowered == "jam_cn0_drop":
         unknown = set(params) - {"start_t", "cn0_drop_db", "sigma_pr_scale", "sigma_prr_scale"}
         if unknown:
@@ -122,5 +150,6 @@ __all__ = [
     "JamCn0DropAttack",
     "SpoofClockRampAttack",
     "SpoofPrRampAttack",
+    "SpoofPositionOffsetAttack",
     "create_attack",
 ]
