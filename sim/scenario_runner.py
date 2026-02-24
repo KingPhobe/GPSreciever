@@ -31,7 +31,7 @@ def run_scenarios(
     for path in scenario_paths:
         scenario = _load_scenario(path)
         scenario_name = str(scenario["name"])
-        run_dir = _reserve_unique_run_dir(run_root, f"{timestamp}_{_slugify(scenario_name)}")
+        run_dir = _unique_run_dir(run_root, f"{timestamp}_{_slugify(scenario_name)}")
         cfg = _build_sim_config(scenario)
         epoch_log_path = run_static_demo(cfg, run_dir, save_figs=save_figs)
         metrics = _summary_from_epoch_logs(epoch_log_path, attack_start_t=_attack_start_t(cfg))
@@ -312,18 +312,16 @@ def _slugify(name: str) -> str:
     return "".join(char if char.isalnum() or char in "-_." else "_" for char in name.lower())
 
 
-def _reserve_unique_run_dir(run_root: Path, base_name: str) -> Path:
-    """Return a non-colliding run directory path (do not create it yet)."""
-
-    candidate = run_root / base_name
+def _unique_run_dir(run_root: Path, stem: str) -> Path:
+    candidate = run_root / stem
     if not candidate.exists():
         return candidate
-    idx = 2
+    suffix = 1
     while True:
-        candidate = run_root / f"{base_name}_{idx}"
+        candidate = run_root / f"{stem}__{suffix:02d}"
         if not candidate.exists():
             return candidate
-        idx += 1
+        suffix += 1
 
 
 def _coerce_bool(value: Any, *, key: str) -> bool:
