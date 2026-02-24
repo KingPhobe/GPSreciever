@@ -160,8 +160,66 @@ class SpoofPositionOffsetAttack:
 
     ramp_time_s: float = 0.0  # 0 => step
 
+    def __post_init__(self) -> None:
+        self._cached_geometry_key: tuple | None = None
+        self._cached_offset_ecef: np.ndarray | None = None
+        self._cached_spoof_pos_ecef: np.ndarray | None = None
+
     def reset(self, seed: int | None = None) -> None:
+        self._cached_geometry_key = None
+        self._cached_offset_ecef = None
+        self._cached_spoof_pos_ecef = None
         return None
+
+    def _ramp_scale(self, t_s: float) -> tuple[float, float]:
+        scale = 1.0
+        scale_dot = 0.0
+        if self.ramp_time_s and self.ramp_time_s > 0.0:
+            elapsed = float(t_s - self.start_t)
+            if elapsed <= 0.0:
+                scale = 0.0
+                scale_dot = 0.0
+            elif elapsed >= float(self.ramp_time_s):
+                scale = 1.0
+                scale_dot = 0.0
+            else:
+                scale = elapsed / float(self.ramp_time_s)
+                scale_dot = 1.0 / float(self.ramp_time_s)
+        return scale, scale_dot
+
+    def _spoof_geometry(
+        self,
+        meas_t: float,
+        rx_truth: "ReceiverTruth",
+        *,
+        scale: float,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        rx_pos = np.asarray(rx_truth.pos_ecef_m, dtype=float).reshape(3)
+        key = (
+            float(meas_t),
+            float(scale),
+            float(self.start_t),
+            float(self.ramp_time_s),
+            float(self.north_m),
+            float(self.east_m),
+            float(self.up_m),
+            float(rx_pos[0]),
+            float(rx_pos[1]),
+            float(rx_pos[2]),
+        )
+        if self._cached_geometry_key != key:
+            offset_ecef = _neu_to_ecef_offset(
+                rx_pos,
+                north_m=float(self.north_m),
+                east_m=float(self.east_m),
+                up_m=float(self.up_m),
+            )
+            self._cached_offset_ecef = offset_ecef
+            self._cached_spoof_pos_ecef = rx_pos + float(scale) * offset_ecef
+            self._cached_geometry_key = key
+        assert self._cached_offset_ecef is not None
+        assert self._cached_spoof_pos_ecef is not None
+        return self._cached_offset_ecef, self._cached_spoof_pos_ecef
 
     def apply(
         self,
@@ -175,27 +233,13 @@ class SpoofPositionOffsetAttack:
         if self.end_t is not None and meas.t > self.end_t:
             return meas, AttackDelta(applied=False)
 
-        scale = 1.0
-        scale_dot = 0.0
-        if self.ramp_time_s and self.ramp_time_s > 0.0:
-            elapsed = float(meas.t - self.start_t)
-            if elapsed <= 0.0:
-                scale = 0.0
-                scale_dot = 0.0
-            elif elapsed >= float(self.ramp_time_s):
-                scale = 1.0
-                scale_dot = 0.0
-            else:
-                scale = elapsed / float(self.ramp_time_s)
-                scale_dot = 1.0 / float(self.ramp_time_s)
+        scale, scale_dot = self._ramp_scale(float(meas.t))
 
-        offset_ecef = _neu_to_ecef_offset(
-            rx_truth.pos_ecef_m,
-            north_m=float(self.north_m),
-            east_m=float(self.east_m),
-            up_m=float(self.up_m),
+        offset_ecef, spoof_pos = self._spoof_geometry(
+            float(meas.t),
+            rx_truth,
+            scale=float(scale),
         )
-        spoof_pos = rx_truth.pos_ecef_m + scale * offset_ecef
 
         los_true = sv_state.pos_ecef_m - rx_truth.pos_ecef_m
         rho_true = float(np.linalg.norm(los_true))
