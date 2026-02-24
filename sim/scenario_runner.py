@@ -89,10 +89,19 @@ def _summary_from_epoch_logs(path: Path, *, attack_start_t: float | None = None)
     residual_rms = _float_column(rows, "residual_rms_m")
     sats_used = _float_column(rows, "sats_used")
     nis_alarm = _float_column(rows, "nis_alarm")
+    composite_alarm = _float_column(rows, "composite_alarm")
+    if composite_alarm.size == 0:
+        composite_alarm = nis_alarm
+    nis_stat_alarm = _float_column(rows, "nis_stat_alarm")
+    integrity_alarm = _float_column(rows, "integrity_alarm")
+    clock_drift_alarm = _float_column(rows, "clock_drift_alarm")
     attack_active = _float_column(rows, "attack_active")
     attack_pr_bias = _float_column(rows, "attack_pr_bias_mean_m")
     attack_prr_bias = _float_column(rows, "attack_prr_bias_mean_mps")
     nis_after_start = _float_column_after_start(rows, "nis_alarm", attack_start_t)
+    composite_after_start = _float_column_after_start(rows, "composite_alarm", attack_start_t)
+    if composite_after_start.size == 0:
+        composite_after_start = nis_after_start
 
     return {
         "pos_err_rms": pos_err_rms,
@@ -101,11 +110,16 @@ def _summary_from_epoch_logs(path: Path, *, attack_start_t: float | None = None)
         "sats_used_mean": _safe_mean(sats_used),
         "sats_used_min": _safe_min(sats_used),
         "nis_alarm_rate": _safe_mean(nis_alarm),
+        "composite_alarm_rate": _safe_mean(composite_alarm),
+        "nis_stat_alarm_rate": _safe_mean(nis_stat_alarm),
+        "integrity_alarm_rate": _safe_mean(integrity_alarm),
+        "clock_drift_alarm_rate": _safe_mean(clock_drift_alarm),
         "attack_active_rate": _safe_mean(attack_active),
         "attack_pr_bias_mean_m_mean": _safe_mean(attack_pr_bias),
         "attack_pr_bias_mean_m_max": _safe_max(attack_pr_bias),
         "attack_prr_bias_mean_mps_mean": _safe_mean(attack_prr_bias),
         "nis_alarm_rate_after_start": _safe_mean(nis_after_start),
+        "composite_alarm_rate_after_start": _safe_mean(composite_after_start),
     }
 
 
@@ -275,11 +289,16 @@ def _append_summary_csv(path: Path, summary: dict[str, Any]) -> None:
         "sats_used_mean",
         "sats_used_min",
         "nis_alarm_rate",
+        "composite_alarm_rate",
+        "nis_stat_alarm_rate",
+        "integrity_alarm_rate",
+        "clock_drift_alarm_rate",
         "attack_active_rate",
         "attack_pr_bias_mean_m_mean",
         "attack_pr_bias_mean_m_max",
         "attack_prr_bias_mean_mps_mean",
         "nis_alarm_rate_after_start",
+        "composite_alarm_rate_after_start",
     ]
     write_header = not path.exists()
     with path.open("a", encoding="utf-8", newline="") as handle:

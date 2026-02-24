@@ -41,6 +41,10 @@ EPOCH_CSV_COLUMNS = [
     "clk_drift_error_sps",
     "nis",
     "nis_alarm",
+    "nis_stat_alarm",
+    "integrity_alarm",
+    "clock_drift_alarm",
+    "composite_alarm",
     "attack_name",
     "gdop",
     "residual_mean_m",
@@ -151,6 +155,12 @@ def _epoch_to_csv_line(epoch: EpochLog) -> str:
     holdover_ok = getattr(epoch, "holdover_ok", None)
     time_since_ground_pps_s = getattr(epoch, "time_since_ground_pps_s", None)
     mode5_auth_bit = getattr(epoch, "mode5_auth_bit", None)
+    nis_stat_alarm = getattr(epoch, "nis_stat_alarm", None)
+    integrity_alarm = getattr(epoch, "integrity_alarm", None)
+    clock_drift_alarm = getattr(epoch, "clock_drift_alarm", None)
+    composite_alarm = getattr(epoch, "composite_alarm", None)
+    if composite_alarm is None:
+        composite_alarm = getattr(epoch, "nis_alarm", None)
     if isinstance(fix_type, FixType):
         fix_type_value = int(fix_type)
     elif fix_type is None:
@@ -194,6 +204,10 @@ def _epoch_to_csv_line(epoch: EpochLog) -> str:
         _format_value(clk_drift_error_sps),
         _format_value(epoch.nis),
         _format_value(int(epoch.nis_alarm)),
+        _format_value(nis_stat_alarm),
+        _format_value(integrity_alarm),
+        _format_value(clock_drift_alarm),
+        _format_value(composite_alarm),
         epoch.attack_name or "",
         _format_value(dop.gdop if dop else None),
         _format_value(residuals.mean_m if residuals else None),
