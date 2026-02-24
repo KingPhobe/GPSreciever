@@ -175,6 +175,9 @@ class EpochLog:
     pps_err_s: float | None = None
     holdover_ok: bool | None = None
     time_since_ground_pps_s: float | None = None
+    mode5_gate_latch_bit: bool | None = None
+    mode5_timing_auth_bit: bool | None = None
+    mode5_authorized_bit: bool | None = None
     mode5_auth_bit: bool | None = None
 
 
