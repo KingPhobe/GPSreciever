@@ -68,9 +68,10 @@ def run_static_demo(
         # Do not pre-sample measurements here. Calling get_measurements(0.0)
         # consumes RNG state and can change run results in verbose mode vs
         # non-verbose mode (reproducibility trap).
+        print("First-epoch pseudoranges (m):")
         print(
-            "Preview: first-epoch measurements will be generated in the main loop "
-            "(no pre-sampling to preserve deterministic RNG behavior)."
+            "  deferred until main loop "
+            "(no pre-sampling to preserve deterministic RNG behavior)"
         )
         for t in range(5):
             sv_states = constellation.get_sv_states(float(t))
