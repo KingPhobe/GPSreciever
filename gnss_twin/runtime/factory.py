@@ -83,6 +83,19 @@ def build_epoch_log(
     sim_cfg = getattr(integrity_checker, "sim_cfg", None)
     include_attack_active = bool(getattr(sim_cfg, "nis_alarm_include_attack_active", False))
     clock_drift_alarm_sps = float(getattr(sim_cfg, "clock_drift_alarm_sps", 0.0) or 0.0)
+    nis_value = _extract_float(step_out.get("nis"))
+    innov_dim = _extract_int(step_out.get("innov_dim"))
+    integrity_alarm = bool(integrity.is_suspect or integrity.is_invalid)
+    alarm_flags = _compute_alarm_flags(
+        nis=nis_value,
+        innov_dim=innov_dim,
+        alpha=float(getattr(integrity_checker.integrity_cfg, "chi_square_alpha", 0.01)),
+        integrity_alarm=integrity_alarm,
+        clk_drift_sps=(sol.clk_drift_sps if sol is not None else None),
+        clock_drift_alarm_sps=clock_drift_alarm_sps,
+        attack_active=bool(applied_count > 0),
+        include_attack_active=include_attack_active,
+    )
     return EpochLog(
         t=float(t_s),
         meas=step_out["meas_attacked"],
@@ -101,18 +114,13 @@ def build_epoch_log(
         vel_ecef=sol.vel_ecef.copy() if sol is not None and sol.vel_ecef is not None else None,
         clk_bias_s=sol.clk_bias_s if sol is not None else None,
         clk_drift_sps=sol.clk_drift_sps if sol is not None else None,
-        nis=_extract_float(step_out.get("nis")),
-        innov_dim=_extract_int(step_out.get("innov_dim")),
-        nis_alarm=_compute_nis_alarm(
-            nis=_extract_float(step_out.get("nis")),
-            innov_dim=_extract_int(step_out.get("innov_dim")),
-            alpha=float(getattr(integrity_checker.integrity_cfg, "chi_square_alpha", 0.01)),
-            integrity_alarm=bool(integrity.is_suspect or integrity.is_invalid),
-            clk_drift_sps=(sol.clk_drift_sps if sol is not None else None),
-            clock_drift_alarm_sps=clock_drift_alarm_sps,
-            attack_active=bool(applied_count > 0),
-            include_attack_active=include_attack_active,
-        ),
+        nis=nis_value,
+        innov_dim=innov_dim,
+        nis_alarm=alarm_flags["composite_alarm"],
+        nis_stat_alarm=alarm_flags["nis_stat_alarm"],
+        integrity_alarm=alarm_flags["integrity_alarm"],
+        clock_drift_alarm=alarm_flags["clock_drift_alarm"],
+        composite_alarm=alarm_flags["composite_alarm"],
         attack_name=attack_name,
         attack_active=applied_count > 0,
         attack_pr_bias_mean_m=attack_pr_bias_mean_m,
@@ -147,7 +155,7 @@ def _extract_int(value: Any | None) -> int | None:
         return None
     return out if out > 0 else None
 
-def _compute_nis_alarm(
+def _compute_alarm_flags(
     *,
     nis: float | None,
     innov_dim: int | None,
@@ -157,17 +165,8 @@ def _compute_nis_alarm(
     clock_drift_alarm_sps: float,
     attack_active: bool,
     include_attack_active: bool,
-) -> bool:
-    """Return a best-effort alarm bit without leaking ground-truth scenario state.
-
-    Alarm can be raised by:
-    - NIS statistic exceeding a chi-square threshold.
-    - Integrity layer marking suspect/invalid.
-    - Clock-drift anomaly (useful for common-mode clock spoofing that may not trip NIS).
-
-    NOTE: `attack_active` is *telemetry* and must not automatically imply an alarm.
-    You may optionally OR it in for backwards-compatibility via `include_attack_active`.
-    """
+) -> dict[str, bool]:
+    """Return explicit alarm contributors and a composite alarm bit."""
     nis_trigger = False
     if nis is not None and innov_dim is not None and innov_dim > 0:
         try:
@@ -184,7 +183,37 @@ def _compute_nis_alarm(
     ):
         clock_trigger = bool(abs(float(clk_drift_sps)) >= float(clock_drift_alarm_sps))
 
-    alarm = bool(nis_trigger or integrity_alarm or clock_trigger)
+    composite_alarm = bool(nis_trigger or integrity_alarm or clock_trigger)
     if include_attack_active:
-        alarm = bool(alarm or attack_active)
-    return alarm
+        composite_alarm = bool(composite_alarm or attack_active)
+
+    return {
+        "nis_stat_alarm": bool(nis_trigger),
+        "integrity_alarm": bool(integrity_alarm),
+        "clock_drift_alarm": bool(clock_trigger),
+        "composite_alarm": bool(composite_alarm),
+    }
+
+
+def _compute_nis_alarm(
+    *,
+    nis: float | None,
+    innov_dim: int | None,
+    alpha: float,
+    integrity_alarm: bool,
+    clk_drift_sps: float | None,
+    clock_drift_alarm_sps: float,
+    attack_active: bool,
+    include_attack_active: bool,
+) -> bool:
+    flags = _compute_alarm_flags(
+        nis=nis,
+        innov_dim=innov_dim,
+        alpha=alpha,
+        integrity_alarm=integrity_alarm,
+        clk_drift_sps=clk_drift_sps,
+        clock_drift_alarm_sps=clock_drift_alarm_sps,
+        attack_active=attack_active,
+        include_attack_active=include_attack_active,
+    )
+    return bool(flags["composite_alarm"])

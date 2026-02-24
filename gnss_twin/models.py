@@ -144,6 +144,10 @@ class EpochLog:
     clk_drift_sps: float | None = None
     nis: float | None = None
     nis_alarm: bool = False
+    nis_stat_alarm: bool = False
+    integrity_alarm: bool = False
+    clock_drift_alarm: bool = False
+    composite_alarm: bool = False
     attack_name: str | None = None
     attack_active: bool = False
     attack_pr_bias_mean_m: float = 0.0
