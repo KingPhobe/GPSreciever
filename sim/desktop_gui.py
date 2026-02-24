@@ -51,6 +51,7 @@ PDOP_OK = 6.0
 DIAG_UPDATE_PERIOD_S = 0.3
 NMEA_PREVIEW_UPDATE_PERIOD_S = 0.2
 NMEA_PREVIEW_LINES = 10
+LIVE_FRAME_REBUILD_EVERY_STEPS = 5
 RUN_TABLE_INTEGRITY_COLUMNS: dict[str, object] = {
     "integrity_p_value": float("nan"),
     "integrity_num_sats_used": float("nan"),
@@ -225,6 +226,8 @@ class MainWindow(QMainWindow):
         self.is_running = False
         self.epochs: list[EpochLog] = []
         self.frame = pd.DataFrame()
+        self._live_frame_dirty = False
+        self._steps_since_live_frame_rebuild = 0
         self.diagnostics_window: DiagnosticsWindow | None = None
         self.last_diag_update_walltime = 0.0
         self.current_run_name = ""
@@ -623,6 +626,8 @@ class MainWindow(QMainWindow):
         self.epochs = []
         self.meas_log_rows = []  # per-SV measurement audit log for post-analysis
         self.frame = pd.DataFrame()
+        self._live_frame_dirty = False
+        self._steps_since_live_frame_rebuild = 0
         self.nmea.reset()
         self.nmea_t0_utc = datetime.now(timezone.utc)
         self.nmea_buffer.clear()
@@ -657,6 +662,7 @@ class MainWindow(QMainWindow):
     def stop_run(self) -> None:
         self.is_running = False
         self.timer.stop()
+        self._refresh_live_frame_if_needed(force=True)
 
     def step_once(self) -> None:
         if self.engine is None or self.cfg is None or self.receiver_truth_state is None:
@@ -675,18 +681,33 @@ class MainWindow(QMainWindow):
         )
         self.epochs.append(epoch)
         self._append_meas_log(step_out, epoch)
-        self.frame = epochs_to_frame(self.epochs)
+        self._live_frame_dirty = True
+        self._steps_since_live_frame_rebuild += 1
         self._step_nmea(float(self.t_s_current), epoch, step_out)
 
         self.t_s_current += float(self.cfg.dt)
         self._update_status_labels(epoch)
-        self._refresh_flags_plot()
-        self._maybe_update_diagnostics()
+        if self._refresh_live_frame_if_needed():
+            self._refresh_flags_plot()
+            self._maybe_update_diagnostics()
         self._maybe_update_nmea_preview()
 
         if self.t_s_current >= float(self.cfg.duration):
             self.stop_run()
+            self._refresh_live_frame_if_needed(force=True)
+            self._refresh_flags_plot()
+            self._maybe_update_diagnostics(force=True)
             self._warn_if_attack_never_applied()
+
+    def _refresh_live_frame_if_needed(self, *, force: bool = False) -> bool:
+        if not self._live_frame_dirty:
+            return False
+        if not force and self._steps_since_live_frame_rebuild < LIVE_FRAME_REBUILD_EVERY_STEPS:
+            return False
+        self.frame = epochs_to_frame(self.epochs)
+        self._live_frame_dirty = False
+        self._steps_since_live_frame_rebuild = 0
+        return True
 
     def _step_nmea(self, t_s: float, epoch: EpochLog, step_out: dict) -> None:
         if not self.nmea_enabled:
