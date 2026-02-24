@@ -177,18 +177,24 @@ def run_static_demo(
         time_since_ground_pps_s = float(hold_info["time_since_ground_pps_s"])
         mode5_gate = epoch_log.conops_mode5 or "deny"
         gnss_valid = bool(gnss_valid_for_disc)
-        mode5_auth_bit = bool(
+        mode5_gate_latch_bit = bool(
             mode5_auth.step(
                 mode5_gate=mode5_gate,
                 gnss_valid=gnss_valid,
                 holdover_ok=holdover_ok,
             )
         )
+        mode5_timing_auth_bit = bool(auth_tel.auth_bit)
+        mode5_authorized_bit = bool(mode5_gate_latch_bit and mode5_timing_auth_bit)
+        mode5_auth_bit = mode5_authorized_bit  # Legacy alias for downstream tooling.
         epoch_log = replace(
             epoch_log,
             pps_err_s=pps_err_s,
             holdover_ok=holdover_ok,
             time_since_ground_pps_s=time_since_ground_pps_s,
+            mode5_gate_latch_bit=mode5_gate_latch_bit,
+            mode5_timing_auth_bit=mode5_timing_auth_bit,
+            mode5_authorized_bit=mode5_authorized_bit,
             mode5_auth_bit=mode5_auth_bit,
         )
         epochs.append(epoch_log)
@@ -236,6 +242,9 @@ def run_static_demo(
             fieldnames=[
                 "t_s",
                 "conops_mode5",
+                "mode5_gate_latch_bit",
+                "mode5_timing_auth_bit",
+                "mode5_authorized_bit",
                 "mode5_auth_bit",
                 "auth_bit",
                 "auth_mode",
@@ -252,6 +261,9 @@ def run_static_demo(
                 {
                     "t_s": epoch.t_s,
                     "conops_mode5": epoch.conops_mode5,
+                    "mode5_gate_latch_bit": int(bool(getattr(epoch, "mode5_gate_latch_bit", False))),
+                    "mode5_timing_auth_bit": int(bool(getattr(epoch, "mode5_timing_auth_bit", False))),
+                    "mode5_authorized_bit": int(bool(getattr(epoch, "mode5_authorized_bit", epoch.mode5_auth_bit))),
                     "mode5_auth_bit": int(bool(epoch.mode5_auth_bit)),
                     "auth_bit": int(bool(epoch.auth_bit)),
                     "auth_mode": epoch.auth_mode,

@@ -75,6 +75,9 @@ EPOCH_CSV_COLUMNS = [
     "pps_err_s",
     "holdover_ok",
     "time_since_ground_pps_s",
+    "mode5_gate_latch_bit",
+    "mode5_timing_auth_bit",
+    "mode5_authorized_bit",
     "mode5_auth_bit",
 ]
 _CSV_HEADER = ",".join(EPOCH_CSV_COLUMNS) + "\n"
@@ -155,6 +158,11 @@ def _epoch_to_csv_line(epoch: EpochLog) -> str:
     holdover_ok = getattr(epoch, "holdover_ok", None)
     time_since_ground_pps_s = getattr(epoch, "time_since_ground_pps_s", None)
     mode5_auth_bit = getattr(epoch, "mode5_auth_bit", None)
+    mode5_gate_latch_bit = getattr(epoch, "mode5_gate_latch_bit", None)
+    mode5_timing_auth_bit = getattr(epoch, "mode5_timing_auth_bit", None)
+    mode5_authorized_bit = getattr(epoch, "mode5_authorized_bit", None)
+    if mode5_authorized_bit is None:
+        mode5_authorized_bit = mode5_auth_bit
     nis_stat_alarm = getattr(epoch, "nis_stat_alarm", None)
     integrity_alarm = getattr(epoch, "integrity_alarm", None)
     clock_drift_alarm = getattr(epoch, "clock_drift_alarm", None)
@@ -238,6 +246,9 @@ def _epoch_to_csv_line(epoch: EpochLog) -> str:
         _format_value(pps_err_s),
         _format_value(holdover_ok),
         _format_value(time_since_ground_pps_s),
+        _format_value(mode5_gate_latch_bit),
+        _format_value(mode5_timing_auth_bit),
+        _format_value(mode5_authorized_bit),
         _format_value(mode5_auth_bit),
     ]
     return ",".join(str(value) for value in row) + "\n"
