@@ -796,18 +796,50 @@ class MainWindow(QMainWindow):
         return gnss_valid.astype(float), receiver_health.astype(float)
 
     def _refresh_flags_plot(self) -> None:
-        if self.frame.empty:
+        if not self.epochs:
             for line in [self.line_attack_active, self.line_gnss_valid, self.line_receiver_health]:
                 line.set_data([], [])
             self.canvas.draw_idle()
             return
 
-        t_vals = self.frame["t_s"].to_numpy(dtype=float)
-        gnss_valid, receiver_health = self._derive_binary_flags(self.frame)
+        t_vals: list[float] = []
+        attack_active_vals: list[float] = []
+        gnss_valid_vals: list[float] = []
+        receiver_health_vals: list[float] = []
 
-        self.line_attack_active.set_data(t_vals, self.frame["attack_active"].astype(float).to_numpy())
-        self.line_gnss_valid.set_data(t_vals, gnss_valid.to_numpy(dtype=float))
-        self.line_receiver_health.set_data(t_vals, receiver_health.to_numpy(dtype=float))
+        for ep in self.epochs:
+            t_ep = ep.t_s if ep.t_s is not None else ep.t
+            t_vals.append(float(t_ep))
+
+            attack_active_vals.append(1.0 if bool(ep.attack_active) else 0.0)
+
+            fix_ok = bool(ep.fix_valid) if ep.fix_valid is not None else False
+            sats_ok = ep.sats_used is not None and float(ep.sats_used) >= 4.0
+            resid_ok = (
+                ep.residual_rms_m is not None
+                and np.isfinite(float(ep.residual_rms_m))
+                and float(ep.residual_rms_m) <= RESID_RMS_OK_M
+            )
+            pdop_ok = (
+                ep.pdop is not None
+                and np.isfinite(float(ep.pdop))
+                and float(ep.pdop) <= PDOP_OK
+            )
+            gnss_ok = bool(fix_ok and sats_ok and resid_ok and pdop_ok)
+            gnss_valid_vals.append(1.0 if gnss_ok else 0.0)
+
+            sol_ok = False
+            if ep.solution is not None and getattr(ep.solution, "pos_ecef", None) is not None:
+                try:
+                    sol_ok = bool(np.isfinite(np.asarray(ep.solution.pos_ecef, dtype=float)).all())
+                except Exception:
+                    sol_ok = False
+            receiver_health_vals.append(1.0 if (gnss_ok and sol_ok) else 0.0)
+
+        t_arr = np.asarray(t_vals, dtype=float)
+        self.line_attack_active.set_data(t_arr, np.asarray(attack_active_vals, dtype=float))
+        self.line_gnss_valid.set_data(t_arr, np.asarray(gnss_valid_vals, dtype=float))
+        self.line_receiver_health.set_data(t_arr, np.asarray(receiver_health_vals, dtype=float))
 
         self.ax_flags.relim()
         self.ax_flags.autoscale_view(scaley=False)
@@ -835,6 +867,8 @@ class MainWindow(QMainWindow):
         if not force and now - self.last_diag_update_walltime < DIAG_UPDATE_PERIOD_S:
             return
         self.last_diag_update_walltime = now
+        # Rebuild the heavy DataFrame only when diagnostics actually need it.
+        self.frame = epochs_to_frame(self.epochs) if self.epochs else pd.DataFrame()
         self.diagnostics_window.update_plots(self.frame)
 
     def save_outputs(self) -> None:
@@ -931,12 +965,12 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Saved", f"Saved to: {run_dir}")
 
     def _warn_if_attack_never_applied(self) -> None:
-        if self.attack_never_applied_warned or self.cfg is None or self.frame.empty:
+        if self.attack_never_applied_warned or self.cfg is None or not self.epochs:
             return
         attack_name = self.cfg.attack_name or "none"
         if attack_name == "none":
             return
-        if bool(self.frame["attack_active"].astype(bool).max()):
+        if any(bool(ep.attack_active) for ep in self.epochs):
             return
         self.attack_never_applied_warned = True
         QMessageBox.warning(
