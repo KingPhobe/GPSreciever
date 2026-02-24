@@ -147,6 +147,7 @@ class SimulationEngine:
         self.logger = logger
         self._default_gate_cfg = SimConfig()
         self._last_t_s: float | None = None
+        self._attack_apply_adapter = _build_attack_apply_adapter(attack_pipeline)
 
     def step(self, t_s: float) -> dict[str, Any]:
         t_s = float(t_s)
@@ -203,12 +204,10 @@ class SimulationEngine:
         if not isinstance(receiver_truth, ReceiverTruth):
             return measurements, None
         self._sync_attack_pipeline_time(measurements)
-        return _call_attack_pipeline_apply(
-            self.attack_pipeline,
-            measurements,
-            sv_states,
-            receiver_truth,
-        )
+        adapter = self._attack_apply_adapter
+        if adapter is None:
+            return measurements, None
+        return adapter(measurements, sv_states, receiver_truth)
 
     def _sync_attack_pipeline_time(self, measurements: list[Any]) -> None:
         if self.attack_pipeline is None:
@@ -295,15 +294,37 @@ def _call_attack_pipeline_apply(
     sv_states: list[Any],
     receiver_truth: ReceiverTruth,
 ) -> tuple[list[Any], Any]:
-    apply_fn = getattr(attack_pipeline, "apply")
+    adapter = _build_attack_apply_adapter(attack_pipeline)
+    if adapter is None:
+        raise TypeError("attack_pipeline must define a callable apply(...) method")
+    return adapter(measurements, sv_states, receiver_truth)
+
+
+def _build_attack_apply_adapter(
+    attack_pipeline: Any,
+) -> Callable[[list[Any], list[Any], ReceiverTruth], tuple[list[Any], Any]] | None:
+    """Build a one-time adapter for AttackPipeline.apply signature variations."""
+    if attack_pipeline is None:
+        return None
+    apply_fn = getattr(attack_pipeline, "apply", None)
+    if not callable(apply_fn):
+        return None
     try:
         signature = inspect.signature(apply_fn)
     except (TypeError, ValueError):
-        return apply_fn(measurements, sv_states, rx_truth=receiver_truth)
+        return lambda measurements, sv_states, receiver_truth: apply_fn(
+            measurements,
+            sv_states,
+            rx_truth=receiver_truth,
+        )
 
     params = signature.parameters
     if "rx_truth" in params:
-        return apply_fn(measurements, sv_states, rx_truth=receiver_truth)
+        return lambda measurements, sv_states, receiver_truth: apply_fn(
+            measurements,
+            sv_states,
+            rx_truth=receiver_truth,
+        )
 
     positional_params = [
         param
@@ -311,8 +332,8 @@ def _call_attack_pipeline_apply(
         if param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
     ]
     if len(positional_params) == 2:
-        return apply_fn(measurements, receiver_truth)
-    return apply_fn(measurements, sv_states, receiver_truth)
+        return lambda measurements, sv_states, receiver_truth: apply_fn(measurements, receiver_truth)
+    return lambda measurements, sv_states, receiver_truth: apply_fn(measurements, sv_states, receiver_truth)
 
 
 def _trivial_integrity_report(
