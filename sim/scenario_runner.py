@@ -31,7 +31,7 @@ def run_scenarios(
     for path in scenario_paths:
         scenario = _load_scenario(path)
         scenario_name = str(scenario["name"])
-        run_dir = run_root / f"{timestamp}_{_slugify(scenario_name)}"
+        run_dir = _reserve_unique_run_dir(run_root, f"{timestamp}_{_slugify(scenario_name)}")
         cfg = _build_sim_config(scenario)
         epoch_log_path = run_static_demo(cfg, run_dir, save_figs=save_figs)
         metrics = _summary_from_epoch_logs(epoch_log_path, attack_start_t=_attack_start_t(cfg))
@@ -64,7 +64,7 @@ def _build_sim_config(scenario: dict[str, Any]) -> SimConfig:
     cfg_kwargs: dict[str, Any] = {
         "duration": float(scenario["duration_s"]),
         "rng_seed": int(scenario["rng_seed"]),
-        "use_ekf": bool(scenario["use_ekf"]),
+        "use_ekf": _coerce_bool(scenario["use_ekf"], key="use_ekf"),
         "attack_name": str(scenario["attack_name"]),
         "attack_params": dict(scenario["attack_params"] or {}),
     }
@@ -291,6 +291,36 @@ def _append_summary_csv(path: Path, summary: dict[str, Any]) -> None:
 
 def _slugify(name: str) -> str:
     return "".join(char if char.isalnum() or char in "-_." else "_" for char in name.lower())
+
+
+def _reserve_unique_run_dir(run_root: Path, base_name: str) -> Path:
+    """Return a non-colliding run directory path (do not create it yet)."""
+
+    candidate = run_root / base_name
+    if not candidate.exists():
+        return candidate
+    idx = 2
+    while True:
+        candidate = run_root / f"{base_name}_{idx}"
+        if not candidate.exists():
+            return candidate
+        idx += 1
+
+
+def _coerce_bool(value: Any, *, key: str) -> bool:
+    """Parse booleans robustly (reject accidental truthy strings like 'false')."""
+
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, np.integer)):
+        return bool(int(value))
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"1", "true", "yes", "y", "on"}:
+            return True
+        if text in {"0", "false", "no", "n", "off"}:
+            return False
+    raise ValueError(f"Scenario field '{key}' must be a boolean (got {value!r})")
 
 
 def _attack_start_t(cfg: SimConfig) -> float | None:
