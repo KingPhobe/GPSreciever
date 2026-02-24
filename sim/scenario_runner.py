@@ -215,7 +215,7 @@ def _float_column_after_start(
         return np.array([], dtype=float)
     values = []
     for row in rows:
-        t_value = _parse_float(row.get("t"))
+        t_value = _row_time_s(row)
         value = _parse_float(row.get(key))
         if (
             t_value is not None
@@ -228,6 +228,13 @@ def _float_column_after_start(
     if not values:
         return np.array([], dtype=float)
     return np.array(values, dtype=float)
+
+
+def _row_time_s(row: dict[str, str]) -> float | None:
+    t_s = _parse_float(row.get("t_s"))
+    if t_s is not None:
+        return t_s
+    return _parse_float(row.get("t"))
 
 
 def _parse_float(value: str | None) -> float | None:
