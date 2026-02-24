@@ -18,6 +18,12 @@ def _cmd_gui(_: argparse.Namespace) -> None:
 
 
 def _cmd_scenario(args: argparse.Namespace) -> None:
+    if getattr(args, "gui", False):
+        from sim.scenario_runner_gui import main as scenario_gui_main
+
+        scenario_gui_main()
+        return
+
     from sim.scenario_runner import run_scenarios
 
     scenarios = [Path(p) for p in (args.scenario or [])]
@@ -39,6 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
     gui.set_defaults(func=_cmd_gui)
 
     scen = sub.add_parser("scenario", help="Run one or more JSON scenarios (headless)")
+    scen.add_argument("--gui", action="store_true", help="Open the scenario runner GUI (headless backend)")
     scen.add_argument("--scenario", action="append", help="Path to a scenario JSON file (repeatable)")
     scen.add_argument("--run-root", type=str, default="runs", help="Root folder for scenario outputs")
     scen.add_argument("--no-plots", action="store_true", help="Skip saving plot PNGs")
