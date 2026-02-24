@@ -64,13 +64,14 @@ def run_static_demo(
         elev_deg, az_deg = elev_az_from_rx_sv(receiver_truth, sv_overhead)
         print(f"Sample elevation/azimuth (deg): ({elev_deg:.2f}, {az_deg:.2f})")
 
-        first_epoch_meas = measurement_source.get_measurements(0.0)
-        print(f"First epoch measurement count: {len(first_epoch_meas)}")
-        print("First-epoch pseudoranges (m):")
-        for meas in first_epoch_meas:
-            print(
-                f"  {meas.sv_id}: {meas.pr_m:.3f} (elev {meas.elev_deg:.2f} deg, cn0 {meas.cn0_dbhz:.1f})"
-            )
+        # IMPORTANT:
+        # Do not pre-sample measurements here. Calling get_measurements(0.0)
+        # consumes RNG state and can change run results in verbose mode vs
+        # non-verbose mode (reproducibility trap).
+        print(
+            "Preview: first-epoch measurements will be generated in the main loop "
+            "(no pre-sampling to preserve deterministic RNG behavior)."
+        )
         for t in range(5):
             sv_states = constellation.get_sv_states(float(t))
             visible = visible_sv_states(receiver_truth, sv_states, elevation_mask_deg=cfg.elev_mask_deg)
@@ -326,8 +327,8 @@ def run_static_demo(
             json.dumps(manifest, indent=2),
             encoding="utf-8",
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"[warn] failed to write run_manifest.json: {exc}")
     return output_dir / "epoch_logs.csv"
 
 
