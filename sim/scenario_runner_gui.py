@@ -472,6 +472,44 @@ class ScenarioRunnerGui(QMainWindow):
     def _show_form_error(self, exc: Exception) -> None:
         QMessageBox.critical(self, "Invalid scenario", str(exc))
 
+    def _validate_queue_payload(self, payload: Any, *, source: str) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError(f"{source}: scenario JSON must be an object")
+
+        payload_copy = json.loads(json.dumps(payload))
+        required = {"name", "duration_s", "rng_seed", "use_ekf", "attack_name", "attack_params"}
+        missing = sorted(required - set(payload_copy.keys()))
+        if missing:
+            raise ValueError(f"{source}: missing required keys: {missing}")
+
+        name = str(payload_copy.get("name", "")).strip()
+        if not name:
+            raise ValueError(f"{source}: name must be a non-empty string")
+        payload_copy["name"] = name
+
+        # Reuse backend parser/build logic for schema/type validation so GUI and CLI
+        # reject the same malformed payloads.
+        from sim.scenario_runner import _build_sim_config
+
+        _build_sim_config(payload_copy)
+        return payload_copy
+
+    def _unique_queue_name(self, base_name: str, *, exclude_idx: int | None = None) -> str:
+        base = str(base_name).strip() or "scenario"
+        used: set[str] = set()
+        for idx, payload in enumerate(self._queue):
+            if exclude_idx is not None and idx == exclude_idx:
+                continue
+            used.add(str(payload.get("name", "")).strip())
+        if base not in used:
+            return base
+        suffix = 2
+        while True:
+            candidate = f"{base}_{suffix}"
+            if candidate not in used:
+                return candidate
+            suffix += 1
+
     # ---------------- queue actions ----------------
     def _queue_label(self, payload: dict[str, Any]) -> str:
         return (
@@ -490,10 +528,14 @@ class ScenarioRunnerGui(QMainWindow):
 
     def _add_to_queue(self) -> None:
         try:
-            payload = self._draft_from_form().to_json_dict()
+            payload = self._validate_queue_payload(self._draft_from_form().to_json_dict(), source="form")
         except Exception as exc:  # noqa: BLE001
             self._show_form_error(exc)
             return
+        unique_name = self._unique_queue_name(str(payload.get("name", "scenario")))
+        if unique_name != payload.get("name"):
+            self._log(f"Renamed duplicate scenario '{payload.get('name')}' -> '{unique_name}'")
+            payload["name"] = unique_name
         self._queue.append(payload)
         self._refresh_queue_list()
         self.queue_list.setCurrentRow(len(self._queue) - 1)
@@ -505,10 +547,14 @@ class ScenarioRunnerGui(QMainWindow):
             self._show_error("No queue item selected")
             return
         try:
-            payload = self._draft_from_form().to_json_dict()
+            payload = self._validate_queue_payload(self._draft_from_form().to_json_dict(), source=f"queue item #{idx + 1}")
         except Exception as exc:  # noqa: BLE001
             self._show_form_error(exc)
             return
+        unique_name = self._unique_queue_name(str(payload.get("name", "scenario")), exclude_idx=idx)
+        if unique_name != payload.get("name"):
+            self._log(f"Renamed duplicate scenario '{payload.get('name')}' -> '{unique_name}'")
+            payload["name"] = unique_name
         self._queue[idx] = payload
         self._refresh_queue_list()
         self.queue_list.setCurrentRow(idx)
@@ -535,7 +581,7 @@ class ScenarioRunnerGui(QMainWindow):
             self._show_error("No queue item selected")
             return
         dup = json.loads(json.dumps(self._queue[idx]))
-        dup["name"] = f"{dup.get('name', 'scenario')}_copy"
+        dup["name"] = self._unique_queue_name(f"{dup.get('name', 'scenario')}_copy")
         self._queue.append(dup)
         self._refresh_queue_list()
         self.queue_list.setCurrentRow(len(self._queue) - 1)
@@ -590,9 +636,14 @@ class ScenarioRunnerGui(QMainWindow):
         for p_str in paths:
             path = Path(p_str)
             try:
-                payload = json.loads(path.read_text(encoding="utf-8"))
-                if not isinstance(payload, dict):
-                    raise ValueError("Scenario JSON must be an object")
+                payload = self._validate_queue_payload(
+                    json.loads(path.read_text(encoding="utf-8")),
+                    source=str(path),
+                )
+                unique_name = self._unique_queue_name(str(payload.get("name", "scenario")))
+                if unique_name != payload.get("name"):
+                    self._log(f"Import rename (duplicate): '{payload.get('name')}' -> '{unique_name}'")
+                    payload["name"] = unique_name
                 self._queue.append(payload)
                 count += 1
             except Exception as exc:  # noqa: BLE001
@@ -647,14 +698,24 @@ class ScenarioRunnerGui(QMainWindow):
         if not run_root:
             self._show_error("Run root is required")
             return
+        preflight_queue: list[dict[str, Any]] = []
+        try:
+            for idx, payload in enumerate(self._queue, start=1):
+                name = str(payload.get("name", "scenario")) if isinstance(payload, dict) else "scenario"
+                preflight_queue.append(
+                    self._validate_queue_payload(payload, source=f"queue item #{idx} ({name})")
+                )
+        except Exception as exc:  # noqa: BLE001
+            self._show_error(f"Preflight validation failed: {exc}")
+            return
         mc_n = int(self.mc_n_spin.value()) if self.mc_enable_chk.isChecked() else 0
         self._log("=" * 70)
-        self._log("Starting run...")
+        self._log(f"Starting run... (preflight OK for {len(preflight_queue)} scenario(s))")
         self._set_running_state(True)
 
         self._thread = QThread(self)
         self._worker = RunWorker(
-            scenarios=json.loads(json.dumps(self._queue)),
+            scenarios=preflight_queue,
             run_root=run_root,
             save_plots=bool(self.save_plots_chk.isChecked()),
             monte_carlo_n=mc_n,
