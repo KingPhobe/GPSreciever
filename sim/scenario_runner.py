@@ -316,7 +316,7 @@ def _unique_run_dir(run_root: Path, stem: str) -> Path:
     candidate = run_root / stem
     if not candidate.exists():
         return candidate
-    suffix = 1
+    suffix = 2
     while True:
         candidate = run_root / f"{stem}__{suffix:02d}"
         if not candidate.exists():
