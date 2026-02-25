@@ -716,13 +716,13 @@ class MainWindow(QMainWindow):
         if sol is None:
             return
         lat_deg, lon_deg, alt_m = ecef_to_lla(*sol.pos_ecef)
-        # Match headless/static path behavior so GUI and scenario runs produce
-        # the same NMEA validity semantics.
         integrity = step_out.get("integrity")
         if integrity is not None:
+            # Match headless/static NMEA validity semantics so the same
+            # scenario does not look "valid" in one run path and invalid in another.
             raim_valid = bool((not integrity.is_suspect) and (not integrity.is_invalid))
         else:
-            # Fallback if integrity object is absent.
+            # Fallback for compatibility if integrity is unavailable.
             raim_valid = bool(sol.fix_flags.raim_passed)
         num_sats = int(epoch.sats_used or 0)
         hdop = epoch.hdop
