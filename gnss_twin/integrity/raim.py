@@ -1,4 +1,15 @@
-"""RAIM-style integrity checks and FDE."""
+"""Legacy RAIM-style integrity checks and FDE.
+
+Legacy module notice:
+    This module is retained for compatibility with older demos/tests that use
+    :class:`gnss_twin.meas.models.Measurement` and
+    :func:`gnss_twin.receiver.solver.wls_solve`.
+
+    Active runtime integrity path:
+        ``gnss_twin.integrity.flags.integrity_pvt``
+
+Do not add new runtime feature work here.
+"""
 
 from __future__ import annotations
 

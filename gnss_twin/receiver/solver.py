@@ -1,4 +1,15 @@
-"""Weighted least squares positioning solver."""
+"""Legacy weighted least squares positioning solver.
+
+Legacy module notice:
+    This solver operates on ``gnss_twin.meas.models.Measurement`` and is kept
+    for backward compatibility with older examples/tests.
+
+    Active runtime solver path:
+        ``gnss_twin.runtime.solver.DefaultPvtSolver`` (using
+        ``gnss_twin.receiver.wls_pvt`` + ``gnss_twin.integrity.flags``)
+
+Do not add new runtime feature work here.
+"""
 
 from __future__ import annotations
 

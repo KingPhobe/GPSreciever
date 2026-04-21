@@ -24,6 +24,19 @@ This repo is intended to be **easy to run**, **easy to extend**, and **determini
 - `sim/scenarios/` – ready-to-run JSON scenarios
 - `tests/` – pytest suite (unit + integration/regression)
 
+### Active vs legacy navigation path
+
+- **Active runtime path (for all new feature work):**
+  - `gnss_twin/runtime/solver.py` (`DefaultPvtSolver`)
+  - `gnss_twin/receiver/wls_pvt.py`
+  - `gnss_twin/integrity/flags.py` (`integrity_pvt`)
+- **Legacy compatibility modules (retained, not for new runtime features):**
+  - `gnss_twin/receiver/solver.py`
+  - `gnss_twin/integrity/raim.py`
+
+If you are adding/changing runtime navigation behavior, implement it in the
+active runtime path above.
+
 Docs:
 - `ARCHITECTURE.md` – system-level architecture and interfaces
 - `docs/PROJECT_DOCUMENTATION.md` – module-by-module walkthrough
