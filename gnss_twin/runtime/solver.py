@@ -20,7 +20,7 @@ import numpy as np
 
 from gnss_twin.config import SimConfig
 from gnss_twin.integrity.flags import IntegrityConfig, SvTracker, integrity_pvt
-from gnss_twin.models import GnssMeasurement, PvtSolution, SvState
+from gnss_twin.models import GnssMeasurement, PvtSolution, SvState, doppler_sigma_hz_to_prr_sigma_mps
 from gnss_twin.receiver.ekf_nav import EkfNav
 from gnss_twin.receiver.gating import postfit_gate
 from gnss_twin.receiver.wls_pvt import WlsPvtResult, wls_pvt
@@ -119,6 +119,13 @@ class DefaultPvtSolver:
                     initial_pos_ecef_m=self.last_pos,
                     initial_clk_bias_s=self.last_clk,
                 )
+                prr_sigmas_mps = [
+                    doppler_sigma_hz_to_prr_sigma_mps(meas.sigma_doppler_hz)
+                    for meas in masked_meas
+                    if meas.prr_mps is not None
+                ]
+                if prr_sigmas_mps:
+                    self.ekf.config.prr_sigma_mps = max(float(np.median(prr_sigmas_mps)), 1e-3)
                 self.ekf.update_prr(masked_meas, sv_states)
 
                 self.last_nis = self.ekf.last_nis

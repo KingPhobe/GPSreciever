@@ -9,6 +9,29 @@ from typing import Mapping
 
 import numpy as np
 
+GPS_L1_CARRIER_HZ = 1_575_420_000.0
+LIGHT_SPEED_MPS = 299_792_458.0
+
+
+def doppler_sigma_hz_to_prr_sigma_mps(
+    sigma_doppler_hz: float,
+    *,
+    carrier_hz: float = GPS_L1_CARRIER_HZ,
+) -> float:
+    """Convert Doppler uncertainty in Hz to range-rate uncertainty in m/s."""
+
+    return abs(float(sigma_doppler_hz)) * (LIGHT_SPEED_MPS / float(carrier_hz))
+
+
+def prr_sigma_mps_to_doppler_sigma_hz(
+    sigma_prr_mps: float,
+    *,
+    carrier_hz: float = GPS_L1_CARRIER_HZ,
+) -> float:
+    """Convert range-rate uncertainty in m/s to Doppler uncertainty in Hz."""
+
+    return abs(float(sigma_prr_mps)) * (float(carrier_hz) / LIGHT_SPEED_MPS)
+
 
 @dataclass(frozen=True)
 class GnssMeasurement:
@@ -22,6 +45,7 @@ class GnssMeasurement:
     cn0_dbhz: float
     elev_deg: float
     az_deg: float
+    sigma_doppler_hz: float = 1.0
     pr_model_corr_m: float = 0.0  # Model correction to subtract in solver (e.g., iono+tropo).
     flags: Mapping[str, bool] = field(default_factory=dict)
 

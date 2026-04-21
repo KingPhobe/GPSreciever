@@ -35,11 +35,8 @@ class JamCn0DropAttack:
         updates: dict[str, float] = {
             "cn0_dbhz": max(0.0, meas.cn0_dbhz - self.cn0_drop_db),
             "sigma_pr_m": meas.sigma_pr_m * self.sigma_pr_scale,
+            "sigma_doppler_hz": meas.sigma_doppler_hz * self.sigma_prr_scale,
         }
-        if hasattr(meas, "sigma_prr_mps"):
-            sigma_prr_mps = getattr(meas, "sigma_prr_mps")
-            if sigma_prr_mps is not None:
-                updates["sigma_prr_mps"] = sigma_prr_mps * self.sigma_prr_scale
         return replace(meas, **updates), AttackDelta(applied=True)
 
 
