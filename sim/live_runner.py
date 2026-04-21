@@ -149,7 +149,25 @@ def _as_int(value: Any, default: int | None = None) -> int | None:
         return default
 
 
-def epoch_to_dict(t_s: float, step: dict[str, Any], attack_name: str) -> dict[str, Any]:
+def _extract_optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(parsed):
+        return None
+    return parsed
+
+
+def epoch_to_dict(
+    t_s: float,
+    step: dict[str, Any],
+    attack_name: str,
+    *,
+    epoch_nis: Any | None = None,
+) -> dict[str, Any]:
     """Convert a live-runner epoch output into a JSONL-compatible record."""
     sol = step.get("sol")
     integrity = step.get("integrity")
@@ -168,7 +186,7 @@ def epoch_to_dict(t_s: float, step: dict[str, Any], attack_name: str) -> dict[st
     clk_bias_s = _as_float(getattr(sol, "clk_bias_s", None))
     clk_drift_sps = _as_float(getattr(sol, "clk_drift_sps", None))
 
-    nis = _as_float(getattr(integrity, "nis", None))
+    nis = _extract_optional_float(epoch_nis)
     is_suspect = bool(getattr(integrity, "is_suspect", False))
     is_invalid = bool(getattr(integrity, "is_invalid", False))
     nis_alarm = is_suspect or is_invalid
@@ -188,7 +206,7 @@ def epoch_to_dict(t_s: float, step: dict[str, Any], attack_name: str) -> dict[st
     conops_status = getattr(getattr(conops, "status", None), "value", None)
     conops_mode5 = getattr(getattr(conops, "mode5", None), "value", None)
 
-    return {
+    out = {
         "t_s": _json_safe(float(t_s)),
         "fix_valid": _json_safe(fix_valid),
         "fix_type": _json_safe(fix_type),
@@ -198,7 +216,6 @@ def epoch_to_dict(t_s: float, step: dict[str, Any], attack_name: str) -> dict[st
         "residual_rms_m": _json_safe(residual_rms_m),
         "clk_bias_s": _json_safe(clk_bias_s),
         "clk_drift_sps": _json_safe(clk_drift_sps),
-        "nis": _json_safe(nis),
         "nis_alarm": _json_safe(nis_alarm),
         "conops_status": _json_safe(conops_status),
         "conops_mode5": _json_safe(conops_mode5),
@@ -209,6 +226,9 @@ def epoch_to_dict(t_s: float, step: dict[str, Any], attack_name: str) -> dict[st
         "attack_pr_bias_mean_m": _json_safe(attack_pr_bias_mean_m),
         "attack_prr_bias_mean_mps": _json_safe(attack_prr_bias_mean_mps),
     }
+    if nis is not None:
+        out["nis"] = _json_safe(nis)
+    return out
 
 
 def run_headless(cfg: SimConfig) -> list[dict[str, Any]]:
@@ -220,7 +240,14 @@ def run_headless(cfg: SimConfig) -> list[dict[str, Any]]:
 
     for t_s in sim_times:
         step = engine.step(float(t_s))
-        logs.append(epoch_to_dict(float(t_s), step, attack_name=attack_name))
+        logs.append(
+            epoch_to_dict(
+                float(t_s),
+                step,
+                attack_name=attack_name,
+                epoch_nis=step.get("nis"),
+            )
+        )
 
     return logs
 
@@ -282,7 +309,12 @@ def main() -> None:
 
             controller.single_step_requested = False
             step = engine.step(float(t_s))
-            record = epoch_to_dict(float(t_s), step, attack_name=args.attack_name)
+            record = epoch_to_dict(
+                float(t_s),
+                step,
+                attack_name=args.attack_name,
+                epoch_nis=step.get("nis"),
+            )
 
             pdop = _as_float(record["pdop"])
             residual_rms_m = _as_float(record["residual_rms_m"])
