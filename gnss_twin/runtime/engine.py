@@ -160,7 +160,11 @@ class SimulationEngine:
             meas_raw = list(self.meas_src.get_measurements(t_s))
             sv_states = self._get_sv_states(t_s)
             rx_truth = getattr(self.meas_src, "receiver_truth", None)
-        meas_attacked, attack_report = self._apply_attacks(meas_raw, sv_states)
+        meas_attacked, attack_report = self._apply_attacks(
+            meas_raw,
+            sv_states,
+            rx_truth_snapshot=rx_truth,
+        )
         gated_meas = self._gate_measurements(meas_attacked)
         sol = self._solve(gated_meas, sv_states, t_s=t_s)
         integrity = self._check_integrity(gated_meas, sv_states, sol)
@@ -197,17 +201,18 @@ class SimulationEngine:
         self,
         measurements: list[Any],
         sv_states: list[Any],
+        *,
+        rx_truth_snapshot: ReceiverTruth | None = None,
     ) -> tuple[list[Any], Any | None]:
         if self.attack_pipeline is None:
             return measurements, None
-        receiver_truth = getattr(self.meas_src, "receiver_truth", None)
-        if not isinstance(receiver_truth, ReceiverTruth):
+        if not isinstance(rx_truth_snapshot, ReceiverTruth):
             return measurements, None
         self._sync_attack_pipeline_time(measurements)
         adapter = self._attack_apply_adapter
         if adapter is None:
             return measurements, None
-        return adapter(measurements, sv_states, receiver_truth)
+        return adapter(measurements, sv_states, rx_truth_snapshot)
 
     def _sync_attack_pipeline_time(self, measurements: list[Any]) -> None:
         if self.attack_pipeline is None:
