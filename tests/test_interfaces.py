@@ -27,6 +27,7 @@ def test_dataclass_fields() -> None:
         "cn0_dbhz",
         "elev_deg",
         "az_deg",
+        "sigma_doppler_hz",
         "pr_model_corr_m",
         "flags",
     ]

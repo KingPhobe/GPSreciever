@@ -1,4 +1,4 @@
-"""Default PVT solver implementation used by runtime engines.
+"""Active runtime PVT solver implementation used by runtime engines.
 
 Runtime-facing wrapper that:
   * runs WLS PVT
@@ -10,6 +10,11 @@ The SimulationEngine expects the solver instance to expose:
   - last_wls
   - last_nis
   - last_innov_dim
+
+This module is the active navigation path for runtime execution.
+Legacy solver/integrity modules are retained only for backward compatibility:
+  * ``gnss_twin.receiver.solver``
+  * ``gnss_twin.integrity.raim``
 """
 
 from __future__ import annotations
